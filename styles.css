@@ -482,6 +482,15 @@ select { width: 100%; border: 1px solid var(--line); border-radius: 12px; paddin
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
+.site-credit {
+  padding: 28px 0 4px;
+  color: #a9a49b;
+  text-align: center;
+  font-size: 11px;
+  letter-spacing: .12em;
+  user-select: none;
+}
+
 @media (max-width: 860px) {
   .stat-grid, .mode-grid { grid-template-columns: 1fr 1fr; }
   .hero { padding: 36px; }
