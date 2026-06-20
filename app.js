@@ -25,6 +25,7 @@
   let setupMode = null;
   let session = null;
   let toastTimer = null;
+  let examTimerInterval = null;
 
   const $ = (id) => document.getElementById(id);
   const screens = [...document.querySelectorAll(".screen")];
@@ -95,6 +96,7 @@
   }
 
   function dashboard() {
+    stopExamTimer();
     const mastered = questions.filter((q) => isMastered(q.id)).length;
     const percent = Math.round((mastered / questions.length) * 100);
     $("mastered-count").textContent = mastered;
@@ -199,6 +201,7 @@
       selected: [],
       submitted: false,
       responses: {},
+      optionOrders: {},
       initialTotal: list.length,
     };
     renderQuestion();
@@ -207,7 +210,7 @@
 
   function startExam() {
     const pick = (type, count) => shuffle(questions.filter((q) => q.type === type)).slice(0, count);
-    const list = shuffle([...pick("单选题", 20), ...pick("多选题", 10), ...pick("判断题", 10)]);
+    const list = [...pick("单选题", 20), ...pick("多选题", 10), ...pick("判断题", 10)];
     session = {
       mode: "exam",
       list,
@@ -215,7 +218,10 @@
       selected: [],
       submitted: false,
       responses: {},
+      optionOrders: {},
+      examEndsAt: Date.now() + 20 * 60 * 1000,
     };
+    startExamTimer();
     renderQuestion();
     showScreen("question-screen");
   }
@@ -233,6 +239,8 @@
       review: "错题复习",
       exam: "模拟考试",
     }[session.mode];
+    $("exam-timer").hidden = session.mode !== "exam";
+    if (session.mode === "exam") updateExamTimer();
 
     let counter;
     let progressValue;
@@ -249,15 +257,25 @@
     $("question-type").textContent = question.type;
     $("question-chapter").textContent = `${question.chapter.toUpperCase()} · ${question.chapterTitle}`;
     $("question-stem").textContent = question.stem;
+    questionCard.classList.remove("question-single", "question-multiple", "question-judge");
+    questionCard.classList.add(
+      question.type === "多选题"
+        ? "question-multiple"
+        : question.type === "判断题"
+          ? "question-judge"
+          : "question-single",
+    );
     $("feedback").className = "feedback";
     $("feedback").textContent = "";
     $("submit-answer-button").classList.remove("visible");
     $("submit-answer-button").disabled = true;
 
     if (session.mode === "study") {
+      $("answer-mode-hint").hidden = true;
       renderStudyAnswer(question);
       $("keyboard-hint").textContent = "空格 / 回车 / →：下一题　　←：上一题";
     } else {
+      renderAnswerModeHint(question);
       renderOptions(question);
       syncSelection();
       if (session.submitted) {
@@ -282,21 +300,36 @@
     questionCard.classList.add("question-enter");
   }
 
+  function renderAnswerModeHint(question) {
+    const hint = $("answer-mode-hint");
+    hint.hidden = false;
+    if (question.type === "多选题") {
+      hint.innerHTML = `
+        <span class="answer-mode-icon" aria-hidden="true">✓✓</span>
+        <span><strong>多项选择</strong><small>可选择多个选项，确认无误后提交答案</small></span>`;
+    } else {
+      hint.innerHTML = `
+        <span class="answer-mode-icon" aria-hidden="true">→</span>
+        <span><strong>${question.type === "判断题" ? "判断选择" : "单项选择"}</strong><small>选择一个答案后将立即提交</small></span>`;
+    }
+  }
+
   function renderStudyAnswer(question) {
+    const displayOptions = displayOptionsFor(question);
     const optionsHtml =
       question.type === "判断题"
         ? ""
-        : question.options
+        : displayOptions
             .map(
               (option, index) => `
                 <div class="option ${question.answer.includes(option.key) ? "correct" : ""}" style="--option-index:${index}">
-                  <span class="option-key">${option.key}</span><span>${escapeHtml(option.text)}</span>
+                  <span class="option-key">${index + 1}</span><span>${escapeHtml(option.text)}</span>
                 </div>`,
             )
             .join("");
     $("answer-area").innerHTML = `
       ${optionsHtml}
-      <div class="answer-reveal" style="--option-index:${question.options.length || 0}"><strong>✓ 正确答案：${answerLabel(question)}</strong><br>${escapeHtml(detailedAnswer(question))}</div>`;
+      <div class="answer-reveal" style="--option-index:${question.options.length || 0}"><strong>✓ 正确答案：${displayAnswerLabel(question)}</strong><br>${escapeHtml(displayDetailedAnswer(question))}</div>`;
   }
 
   function renderOptions(question) {
@@ -306,13 +339,16 @@
             { key: "T", text: "对", digit: "1" },
             { key: "F", text: "错", digit: "0" },
           ]
-        : question.options.map((option, index) => ({ ...option, digit: String(index + 1) }));
+        : displayOptionsFor(question).map((option, index) => ({ ...option, digit: String(index + 1) }));
 
     $("answer-area").innerHTML = options
       .map(
         (option, index) => `
           <button class="option" data-answer="${option.key}" type="button" style="--option-index:${index}">
-            <span class="option-key">${option.digit}</span>
+            <span class="option-key">
+              <span class="option-number">${option.digit}</span>
+              <span class="option-check" aria-hidden="true">✓</span>
+            </span>
             <span>${escapeHtml(option.text)}</span>
           </button>`,
       )
@@ -392,7 +428,7 @@
     feedback.className = `feedback visible ${response.correct ? "correct" : "wrong"}`;
     feedback.innerHTML = response.correct
       ? `✅ 正确！${isMastered(question.id) ? "该题已连续答对两次，移出错题本。" : "再连续答对一次即可掌握。"}`
-      : `❌ 错误！正确答案：${answerLabel(question)}　${escapeHtml(detailedAnswer(question))}`;
+      : `❌ 错误！正确答案：${displayAnswerLabel(question)}　${escapeHtml(displayDetailedAnswer(question))}`;
     $("keyboard-hint").textContent = "点击“下一题”，或按回车 / 空格继续";
   }
 
@@ -508,7 +544,15 @@
   }
 
   function finishExam() {
-    const answers = session.list.map((question) => session.responses[question.id]).filter(Boolean);
+    stopExamTimer();
+    const answers = session.list.map((question) =>
+      session.responses[question.id] || {
+        questionId: question.id,
+        selected: [],
+        submitted: false,
+        correct: false,
+      },
+    );
     const points = { 单选题: 3, 多选题: 3, 判断题: 1 };
     let score = 0;
     for (const answer of answers) {
@@ -535,8 +579,8 @@
           <article class="review-item ${answer.correct ? "" : "wrong"}">
             <span class="${answer.correct ? "good" : "bad"}">${answer.correct ? "✅ 正确" : "❌ 错误"} · 第 ${index + 1} 题 · ${question.type}</span>
             <h3>${escapeHtml(question.stem)}</h3>
-            <p>你的答案：${escapeHtml(answerLabel(question, answer.selected))}</p>
-            <p>正确答案：<strong>${escapeHtml(answerLabel(question))}</strong>　${escapeHtml(detailedAnswer(question))}</p>
+            <p>你的答案：${answer.selected.length ? escapeHtml(displayAnswerLabel(question, answer.selected)) : "未作答"}</p>
+            <p>正确答案：<strong>${escapeHtml(displayAnswerLabel(question))}</strong>　${escapeHtml(displayDetailedAnswer(question))}</p>
           </article>`;
       })
       .join("");
@@ -588,6 +632,66 @@
     return result;
   }
 
+  function startExamTimer() {
+    stopExamTimer();
+    updateExamTimer();
+    examTimerInterval = window.setInterval(updateExamTimer, 1000);
+  }
+
+  function stopExamTimer() {
+    if (examTimerInterval) {
+      window.clearInterval(examTimerInterval);
+      examTimerInterval = null;
+    }
+    $("exam-timer").hidden = true;
+  }
+
+  function updateExamTimer() {
+    if (!session || session.mode !== "exam" || !session.examEndsAt) return;
+    const remaining = Math.max(0, session.examEndsAt - Date.now());
+    const totalSeconds = Math.ceil(remaining / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    const timer = $("exam-timer");
+    timer.hidden = false;
+    timer.textContent = `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    timer.classList.toggle("warning", totalSeconds <= 5 * 60 && totalSeconds > 60);
+    timer.classList.toggle("urgent", totalSeconds <= 60);
+    if (remaining <= 0) {
+      showToast("考试时间已到，系统已自动交卷");
+      finishExam();
+    }
+  }
+
+  function displayOptionsFor(question) {
+    if (question.type === "判断题") return [];
+    if (!session.optionOrders[question.id]) {
+      session.optionOrders[question.id] = shuffle(question.options.map((option) => option.key));
+    }
+    const order = session.optionOrders[question.id];
+    return order.map((key) => question.options.find((option) => option.key === key));
+  }
+
+  function displayAnswerLabel(question, answer = question.answer) {
+    if (question.type === "判断题") return answerLabel(question, answer);
+    const order = session.optionOrders[question.id] || question.options.map((option) => option.key);
+    return answer
+      .map((key) => order.indexOf(key) + 1)
+      .filter((position) => position > 0)
+      .sort((a, b) => a - b)
+      .join("、");
+  }
+
+  function displayDetailedAnswer(question, answer = question.answer) {
+    if (question.type === "判断题") return answerLabel(question, answer);
+    const displayOptions = displayOptionsFor(question);
+    return displayOptions
+      .map((option, index) => ({ option, position: index + 1 }))
+      .filter(({ option }) => answer.includes(option.key))
+      .map(({ option, position }) => `${position}. ${option.text}`)
+      .join("；");
+  }
+
   function escapeHtml(value) {
     return String(value)
       .replaceAll("&", "&amp;")
@@ -624,7 +728,7 @@
     if (question.type === "判断题" && (key === "1" || key === "0")) {
       selectAnswer(key === "1" ? "T" : "F");
     } else if (question.type !== "判断题" && /^[1-9]$/.test(key)) {
-      const option = question.options[Number(key) - 1];
+      const option = displayOptionsFor(question)[Number(key) - 1];
       if (option) selectAnswer(option.key);
     } else if (question.type === "多选题" && key === "Enter") {
       event.preventDefault();
