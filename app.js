@@ -27,7 +27,6 @@
   let session = null;
   let toastTimer = null;
   let examTimerInterval = null;
-  let deferredInstallPrompt = null;
 
   const $ = (id) => document.getElementById(id);
   const screens = [...document.querySelectorAll(".screen")];
@@ -877,31 +876,23 @@
     }
   }
 
-  function setupPwa() {
-    if ("serviceWorker" in navigator && location.protocol !== "file:") {
-      navigator.serviceWorker.register("./sw.js").catch(() => {});
+  async function removeLegacyPwa() {
+    if ("serviceWorker" in navigator) {
+      try {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(registrations.map((registration) => registration.unregister()));
+      } catch {
+        // 不阻塞题库启动。
+      }
     }
-    window.addEventListener("beforeinstallprompt", (event) => {
-      event.preventDefault();
-      deferredInstallPrompt = event;
-      $("install-button").hidden = false;
-    });
-    window.addEventListener("appinstalled", () => {
-      deferredInstallPrompt = null;
-      $("install-button").hidden = true;
-      showToast("应用已安装，可从桌面直接打开");
-    });
-  }
-
-  async function installApp() {
-    if (!deferredInstallPrompt) {
-      showToast("可在浏览器菜单中选择“添加到主屏幕”或“安装应用”");
-      return;
+    if ("caches" in window) {
+      try {
+        const keys = await caches.keys();
+        await Promise.all(keys.filter((key) => key.startsWith("xigai-quiz-")).map((key) => caches.delete(key)));
+      } catch {
+        // 不阻塞题库启动。
+      }
     }
-    deferredInstallPrompt.prompt();
-    await deferredInstallPrompt.userChoice;
-    deferredInstallPrompt = null;
-    $("install-button").hidden = true;
   }
 
   function displayOptionsFor(question) {
@@ -1006,9 +997,8 @@
   });
   $("submit-exam-button").addEventListener("click", requestExamSubmission);
   $("sheet-submit-exam-button").addEventListener("click", requestExamSubmission);
-  $("install-button").addEventListener("click", installApp);
   document.addEventListener("keydown", handleKeydown);
 
-  setupPwa();
+  removeLegacyPwa();
   dashboard();
 })();
