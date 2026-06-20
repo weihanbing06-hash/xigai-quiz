@@ -148,8 +148,19 @@
             </div>
             <h2 id="question-stem"></h2>
             <div id="answer-area" class="answer-area"></div>
+            <button id="submit-answer-button" class="submit-answer-button" type="button">提交答案</button>
             <div id="feedback" class="feedback" aria-live="polite"></div>
             <div id="keyboard-hint" class="keyboard-hint"></div>
+            <nav class="question-navigation" aria-label="题目导航">
+              <button id="previous-question-button" class="nav-question-button" type="button">← 上一题</button>
+              <form id="jump-form" class="jump-form">
+                <label for="jump-input">跳至</label>
+                <input id="jump-input" type="number" min="1" inputmode="numeric" aria-label="输入题号" />
+                <span id="jump-total"></span>
+                <button class="jump-button" type="submit">跳转</button>
+              </form>
+              <button id="next-question-button" class="nav-question-button primary-nav" type="button">下一题 →</button>
+            </nav>
           </article>
         </section>
 

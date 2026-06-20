@@ -198,8 +198,8 @@
       scopeKey,
       selected: [],
       submitted: false,
+      responses: {},
       initialTotal: list.length,
-      completed: 0,
     };
     renderQuestion();
     showScreen("question-screen");
@@ -214,7 +214,7 @@
       index: 0,
       selected: [],
       submitted: false,
-      answers: [],
+      responses: {},
     };
     renderQuestion();
     showScreen("question-screen");
@@ -224,8 +224,9 @@
     const question = session.list[session.index];
     const questionCard = document.querySelector(".question-card");
     questionCard.classList.remove("question-enter");
-    session.selected = [];
-    session.submitted = false;
+    const response = session.responses[question.id];
+    session.selected = response ? [...response.selected] : [];
+    session.submitted = Boolean(response?.submitted);
     $("mode-label").textContent = {
       study: "背题模式",
       practice: "刷题模式",
@@ -250,19 +251,31 @@
     $("question-stem").textContent = question.stem;
     $("feedback").className = "feedback";
     $("feedback").textContent = "";
+    $("submit-answer-button").classList.remove("visible");
+    $("submit-answer-button").disabled = true;
 
     if (session.mode === "study") {
       renderStudyAnswer(question);
       $("keyboard-hint").textContent = "空格 / 回车 / →：下一题　　←：上一题";
     } else {
       renderOptions(question);
-      $("keyboard-hint").textContent =
-        question.type === "多选题"
-          ? "按 1—4 选择或取消，按回车提交"
-          : question.type === "判断题"
-            ? "按 1 选择“对”，按 0 选择“错”并自动提交"
-            : "按 1—4 选择并自动提交";
+      syncSelection();
+      if (session.submitted) {
+        showSubmittedAnswer(question, response);
+      } else {
+        $("keyboard-hint").textContent =
+          question.type === "多选题"
+            ? "点击选项或按 1—4 选择，按回车提交"
+            : question.type === "判断题"
+              ? "点击选项，或按 1 选择“对”、按 0 选择“错”"
+              : "点击选项，或按 1—4 直接作答";
+        if (question.type === "多选题") {
+          $("submit-answer-button").classList.add("visible");
+          $("submit-answer-button").disabled = session.selected.length === 0;
+        }
+      }
     }
+    updateQuestionNavigation();
 
     // 强制浏览器确认初始状态，使每次切题都能重新播放入场动画。
     void questionCard.offsetWidth;
@@ -317,10 +330,13 @@
       session.selected = session.selected.includes(key)
         ? session.selected.filter((item) => item !== key)
         : [...session.selected, key];
+      session.responses[question.id] = { selected: [...session.selected], submitted: false };
       syncSelection();
+      $("submit-answer-button").disabled = session.selected.length === 0;
       return;
     }
     session.selected = [key];
+    session.responses[question.id] = { selected: [...session.selected], submitted: false };
     syncSelection();
     submitAnswer();
   }
@@ -336,36 +352,48 @@
     const question = session.list[session.index];
     const isCorrect = sameAnswer(session.selected, question.answer);
     session.submitted = true;
+    const response = {
+      questionId: question.id,
+      selected: [...session.selected],
+      submitted: true,
+      correct: isCorrect,
+    };
+    session.responses[question.id] = response;
+    recordAnswer(question, isCorrect);
+    $("submit-answer-button").classList.remove("visible");
 
     if (session.mode === "exam") {
-      recordAnswer(question, isCorrect);
-      session.answers.push({
-        questionId: question.id,
-        selected: [...session.selected],
-        correct: isCorrect,
-      });
-      if (session.index >= session.list.length - 1) finishExam();
-      else {
-        session.index += 1;
-        renderQuestion();
-      }
+      showSubmittedAnswer(question, response);
+      updateQuestionNavigation();
       return;
     }
 
-    recordAnswer(question, isCorrect);
+    showSubmittedAnswer(question, response);
+    updateQuestionNavigation();
+  }
+
+  function showSubmittedAnswer(question, response) {
     document.querySelectorAll("[data-answer]").forEach((button) => {
       const key = button.dataset.answer;
       button.disabled = true;
-      if (question.answer.includes(key)) button.classList.add("correct");
-      if (session.selected.includes(key) && !question.answer.includes(key)) button.classList.add("wrong");
+      button.classList.toggle("selected", response.selected.includes(key));
+      if (session.mode !== "exam") {
+        if (question.answer.includes(key)) button.classList.add("correct");
+        if (response.selected.includes(key) && !question.answer.includes(key)) button.classList.add("wrong");
+      }
     });
 
+    if (session.mode === "exam") {
+      $("keyboard-hint").textContent = "已作答，可使用下方按钮检查其他题目；交卷前不显示答案";
+      return;
+    }
+
     const feedback = $("feedback");
-    feedback.className = `feedback visible ${isCorrect ? "correct" : "wrong"}`;
-    feedback.innerHTML = isCorrect
+    feedback.className = `feedback visible ${response.correct ? "correct" : "wrong"}`;
+    feedback.innerHTML = response.correct
       ? `✅ 正确！${isMastered(question.id) ? "该题已连续答对两次，移出错题本。" : "再连续答对一次即可掌握。"}`
       : `❌ 错误！正确答案：${answerLabel(question)}　${escapeHtml(detailedAnswer(question))}`;
-    $("keyboard-hint").textContent = "按回车 / 空格进入下一题";
+    $("keyboard-hint").textContent = "点击“下一题”，或按回车 / 空格继续";
   }
 
   function nextQuestion() {
@@ -375,49 +403,118 @@
         showToast("这一范围已经背到最后一题");
         return;
       }
-      session.index += 1;
-      progress.studyPositions[session.scopeKey] = session.index;
-      saveProgress();
-      renderQuestion();
+      goToQuestion(session.index + 1);
       return;
     }
-    if (!session.submitted || session.mode === "exam") return;
 
     if (session.mode === "review") {
-      const current = session.list[session.index];
-      session.list.splice(session.index, 1);
-      if (!isMastered(current.id)) session.list.push(current);
-      if (!session.list.length) {
+      if (session.list.every((question) => isMastered(question.id))) {
         dashboard();
         showToast("🎉 本轮错题已经全部清零");
         return;
       }
-      if (session.index >= session.list.length) session.index = 0;
-    } else if (session.index >= session.list.length - 1) {
+      prepareReviewQuestionForRevisit();
+      const nextIndex = findReviewIndex(1);
+      goToQuestion(nextIndex);
+      return;
+    }
+
+    if (session.mode === "exam") {
+      const answered = answeredExamCount();
+      if (session.index >= session.list.length - 1) {
+        if (answered === session.list.length) {
+          finishExam();
+        } else {
+          const firstUnanswered = session.list.findIndex((question) => !session.responses[question.id]?.submitted);
+          showToast(`还有 ${session.list.length - answered} 题未作答，已跳至第一道未答题`);
+          goToQuestion(firstUnanswered);
+        }
+      } else {
+        goToQuestion(session.index + 1);
+      }
+      return;
+    }
+
+    if (session.index >= session.list.length - 1) {
       dashboard();
       showToast("本轮刷题已完成");
-      return;
     } else {
-      session.index += 1;
+      goToQuestion(session.index + 1);
+    }
+  }
+
+  function previousQuestion() {
+    if (!session || session.index <= 0) return;
+    if (session.mode === "review") prepareReviewQuestionForRevisit();
+    goToQuestion(session.index - 1);
+  }
+
+  function goToQuestion(index) {
+    if (!session || index < 0 || index >= session.list.length) return;
+    session.index = index;
+    if (session.mode === "study") {
+      progress.studyPositions[session.scopeKey] = session.index;
+      saveProgress();
     }
     renderQuestion();
   }
 
-  function previousStudyQuestion() {
-    if (session?.mode !== "study" || session.index <= 0) return;
-    session.index -= 1;
-    progress.studyPositions[session.scopeKey] = session.index;
-    saveProgress();
-    renderQuestion();
+  function jumpToQuestion(event) {
+    event.preventDefault();
+    if (!session) return;
+    const target = Number($("jump-input").value);
+    if (!Number.isInteger(target) || target < 1 || target > session.list.length) {
+      showToast(`请输入 1—${session.list.length} 之间的题号`);
+      return;
+    }
+    if (session.mode === "review") prepareReviewQuestionForRevisit();
+    goToQuestion(target - 1);
+  }
+
+  function prepareReviewQuestionForRevisit() {
+    const current = session.list[session.index];
+    if (session.responses[current.id]?.submitted && !isMastered(current.id)) {
+      delete session.responses[current.id];
+    }
+  }
+
+  function findReviewIndex(direction) {
+    for (let offset = 1; offset <= session.list.length; offset += 1) {
+      const index = (session.index + direction * offset + session.list.length) % session.list.length;
+      if (!isMastered(session.list[index].id)) return index;
+    }
+    return session.index;
+  }
+
+  function answeredExamCount() {
+    return session.list.filter((question) => session.responses[question.id]?.submitted).length;
+  }
+
+  function updateQuestionNavigation() {
+    $("previous-question-button").disabled = session.index <= 0;
+    $("jump-input").value = session.index + 1;
+    $("jump-input").max = session.list.length;
+    $("jump-total").textContent = `/ ${session.list.length}`;
+
+    const nextButton = $("next-question-button");
+    nextButton.disabled = session.mode === "study" && session.index >= session.list.length - 1;
+    if (session.mode === "exam" && session.index >= session.list.length - 1) {
+      nextButton.textContent = answeredExamCount() === session.list.length ? "交卷 ✓" : "查找未答题 →";
+    } else if (session.mode === "practice" && session.index >= session.list.length - 1) {
+      nextButton.textContent = "完成本轮 ✓";
+    } else {
+      nextButton.textContent = "下一题 →";
+    }
   }
 
   function finishExam() {
+    const answers = session.list.map((question) => session.responses[question.id]).filter(Boolean);
     const points = { 单选题: 3, 多选题: 3, 判断题: 1 };
     let score = 0;
-    for (const answer of session.answers) {
+    for (const answer of answers) {
       if (answer.correct) score += points[questionMap.get(answer.questionId).type];
     }
-    const correctCount = session.answers.filter((a) => a.correct).length;
+    const correctCount = answers.filter((a) => a.correct).length;
     $("exam-score").textContent = score;
     $("score-circle").style.setProperty("--progress", `${score}%`);
     $("result-title").textContent = score >= 85 ? "状态很好，继续稳住。" : score >= 60 ? "已经及格，错题还值得再磨一轮。" : "先别慌，错题本正好告诉你该往哪用力。";
@@ -425,13 +522,13 @@
 
     $("exam-breakdown").innerHTML = ["单选题", "多选题", "判断题"]
       .map((type) => {
-        const typeAnswers = session.answers.filter((answer) => questionMap.get(answer.questionId).type === type);
+        const typeAnswers = answers.filter((answer) => questionMap.get(answer.questionId).type === type);
         const right = typeAnswers.filter((answer) => answer.correct).length;
         return `<article class="stat-card"><span>${type}</span><strong>${right}/${typeAnswers.length}</strong><small>本题型答对</small></article>`;
       })
       .join("") + `<article class="stat-card ${score < 60 ? "danger" : ""}"><span>总分</span><strong>${score}</strong><small>满分 100</small></article>`;
 
-    $("exam-review-list").innerHTML = session.answers
+    $("exam-review-list").innerHTML = answers
       .map((answer, index) => {
         const question = questionMap.get(answer.questionId);
         return `
@@ -502,6 +599,7 @@
 
   function handleKeydown(event) {
     if (!session || !$("question-screen").classList.contains("active")) return;
+    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
     const key = event.key;
     if (session.mode === "study") {
       if ([" ", "Enter", "ArrowRight"].includes(key)) {
@@ -509,7 +607,7 @@
         nextQuestion();
       } else if (key === "ArrowLeft") {
         event.preventDefault();
-        previousStudyQuestion();
+        previousQuestion();
       }
       return;
     }
@@ -550,6 +648,10 @@
   $("export-button").addEventListener("click", exportProgress);
   $("import-input").addEventListener("change", importProgress);
   $("reset-button").addEventListener("click", resetProgress);
+  $("previous-question-button").addEventListener("click", previousQuestion);
+  $("next-question-button").addEventListener("click", nextQuestion);
+  $("submit-answer-button").addEventListener("click", submitAnswer);
+  $("jump-form").addEventListener("submit", jumpToQuestion);
   document.addEventListener("keydown", handleKeydown);
 
   dashboard();
