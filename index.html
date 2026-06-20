@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>习概 · 四日冲刺刷题</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <button id="home-button" class="brand" type="button" aria-label="返回首页">
+          <span class="brand-mark">习</span>
+          <span>
+            <strong>习概四日冲刺</strong>
+            <small>969 题离线题库</small>
+          </span>
+        </button>
+        <div class="header-actions">
+          <button id="export-button" class="quiet-button" type="button">导出进度</button>
+          <label class="quiet-button file-button">
+            导入进度
+            <input id="import-input" type="file" accept=".json,application/json" />
+          </label>
+        </div>
+      </header>
+
+      <main>
+        <section id="dashboard-screen" class="screen active">
+          <div class="hero">
+            <div>
+              <p class="eyebrow">6 月 21—24 日冲刺版</p>
+              <h1>把不会的题，一道道清零。</h1>
+              <p class="hero-copy">
+                所有题初始都在错题本。任一答题模式中连续答对两次，即视为掌握。
+              </p>
+            </div>
+            <div class="mastery-ring" id="mastery-ring">
+              <strong id="mastery-percent">0%</strong>
+              <span>已掌握</span>
+            </div>
+          </div>
+
+          <div class="stat-grid">
+            <article class="stat-card">
+              <span>已掌握</span>
+              <strong id="mastered-count">0</strong>
+              <small>连续答对 2 次</small>
+            </article>
+            <article class="stat-card danger">
+              <span>错题待清</span>
+              <strong id="wrong-count">969</strong>
+              <small>当前仍需复习</small>
+            </article>
+            <article class="stat-card">
+              <span>答题总次数</span>
+              <strong id="attempt-count">0</strong>
+              <small id="accuracy-label">正确率 0%</small>
+            </article>
+            <article class="stat-card">
+              <span>题库规模</span>
+              <strong>969</strong>
+              <small>17 章 · 3 种题型</small>
+            </article>
+          </div>
+
+          <div class="mode-grid">
+            <button class="mode-card learn" data-mode="study" type="button">
+              <span class="mode-icon">👁</span>
+              <strong>背题模式</strong>
+              <p>按顺序看题与答案，不重复，键盘翻到下一题。</p>
+              <span class="mode-link">开始背题 →</span>
+            </button>
+            <button class="mode-card practice" data-mode="practice" type="button">
+              <span class="mode-icon">⌨</span>
+              <strong>刷题模式</strong>
+              <p>按顺序作答，即时判分，答错自动回到错题本。</p>
+              <span class="mode-link">开始刷题 →</span>
+            </button>
+            <button class="mode-card review" data-mode="review" type="button">
+              <span class="mode-icon">↻</span>
+              <strong>错题复习</strong>
+              <p>只练未掌握题，循环出现，直到连续答对两次。</p>
+              <span class="mode-link">清空错题 →</span>
+            </button>
+            <button class="mode-card exam" data-mode="exam" type="button">
+              <span class="mode-icon">✦</span>
+              <strong>模拟考试</strong>
+              <p>随机 40 题，满分 100，交卷后统一查看结果。</p>
+              <span class="mode-link">开始模考 →</span>
+            </button>
+          </div>
+
+          <section class="chapter-progress-panel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">章节掌握度</p>
+                <h2>17 章学习进度</h2>
+              </div>
+              <button id="reset-button" class="danger-button" type="button">重置全部进度</button>
+            </div>
+            <div id="chapter-progress-list" class="chapter-progress-list"></div>
+          </section>
+        </section>
+
+        <section id="setup-screen" class="screen">
+          <button class="back-link" data-action="home" type="button">← 返回首页</button>
+          <div class="setup-card">
+            <p id="setup-eyebrow" class="eyebrow"></p>
+            <h1 id="setup-title"></h1>
+            <p id="setup-description" class="setup-description"></p>
+
+            <div id="scope-fields" class="form-grid">
+              <label>
+                <span>练习范围</span>
+                <select id="chapter-select"></select>
+              </label>
+              <label>
+                <span>题型</span>
+                <select id="type-select">
+                  <option value="全部">全部题型</option>
+                  <option value="单选题">单选题</option>
+                  <option value="多选题">多选题</option>
+                  <option value="判断题">判断题</option>
+                </select>
+              </label>
+            </div>
+
+            <div id="setup-summary" class="setup-summary"></div>
+            <button id="start-button" class="primary-button" type="button">开始</button>
+          </div>
+        </section>
+
+        <section id="question-screen" class="screen">
+          <div class="question-toolbar">
+            <button class="back-link" data-action="home" type="button">← 退出本轮</button>
+            <div class="question-progress">
+              <span id="mode-label"></span>
+              <strong id="question-counter"></strong>
+            </div>
+          </div>
+          <div class="progress-track"><div id="question-progress-bar"></div></div>
+
+          <article class="question-card">
+            <div class="question-meta">
+              <span id="question-type" class="type-badge"></span>
+              <span id="question-chapter"></span>
+            </div>
+            <h2 id="question-stem"></h2>
+            <div id="answer-area" class="answer-area"></div>
+            <div id="feedback" class="feedback" aria-live="polite"></div>
+            <div id="keyboard-hint" class="keyboard-hint"></div>
+          </article>
+        </section>
+
+        <section id="result-screen" class="screen">
+          <button class="back-link" data-action="home" type="button">← 返回首页</button>
+          <div class="result-hero">
+            <p class="eyebrow">模拟考试结果</p>
+            <div id="score-circle" class="score-circle"><strong id="exam-score">0</strong><span>分</span></div>
+            <h1 id="result-title"></h1>
+            <p id="result-summary"></p>
+          </div>
+          <div id="exam-breakdown" class="stat-grid result-stats"></div>
+          <div class="result-actions">
+            <button id="retry-exam-button" class="primary-button" type="button">再考一次</button>
+            <button class="secondary-button" data-action="home" type="button">返回首页</button>
+          </div>
+          <div id="exam-review-list" class="exam-review-list"></div>
+        </section>
+      </main>
+    </div>
+
+    <div id="toast" class="toast" role="status"></div>
+    <script src="question-bank.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
