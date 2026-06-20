@@ -8,6 +8,7 @@
   }
 
   const STORAGE_KEY = "xigai-quiz-progress-v1";
+  const SESSION_KEY = "xigai-quiz-active-session-v1";
   const questions = BANK.questions;
   const questionMap = new Map(questions.map((question) => [question.id, question]));
   const chapters = [...new Map(questions.map((q) => [q.chapter, q.chapterTitle])).entries()];
@@ -26,6 +27,7 @@
   let session = null;
   let toastTimer = null;
   let examTimerInterval = null;
+  let deferredInstallPrompt = null;
 
   const $ = (id) => document.getElementById(id);
   const screens = [...document.querySelectorAll(".screen")];
@@ -42,6 +44,56 @@
   function saveProgress() {
     progress.updatedAt = new Date().toISOString();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
+  }
+
+  function saveActiveSession() {
+    if (!session) {
+      localStorage.removeItem(SESSION_KEY);
+      return;
+    }
+    const payload = {
+      version: 1,
+      mode: session.mode,
+      listIds: session.list.map((question) => question.id),
+      index: session.index,
+      scopeKey: session.scopeKey || "",
+      responses: session.responses || {},
+      optionOrders: session.optionOrders || {},
+      initialTotal: session.initialTotal || session.list.length,
+      examEndsAt: session.examEndsAt || null,
+      savedAt: Date.now(),
+    };
+    localStorage.setItem(SESSION_KEY, JSON.stringify(payload));
+  }
+
+  function loadActiveSession() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(SESSION_KEY));
+      if (saved?.version !== 1 || !Array.isArray(saved.listIds) || !saved.listIds.length) return null;
+      const list = saved.listIds.map((id) => questionMap.get(id)).filter(Boolean);
+      if (list.length !== saved.listIds.length) return null;
+      return {
+        mode: saved.mode,
+        list,
+        index: Math.min(Math.max(0, Number(saved.index) || 0), list.length - 1),
+        scopeKey: saved.scopeKey || "",
+        selected: [],
+        submitted: false,
+        responses: saved.responses || {},
+        optionOrders: saved.optionOrders || {},
+        initialTotal: saved.initialTotal || list.length,
+        examEndsAt: saved.examEndsAt || null,
+        savedAt: saved.savedAt || Date.now(),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function clearActiveSession() {
+    session = null;
+    localStorage.removeItem(SESSION_KEY);
+    stopExamTimer();
   }
 
   function showScreen(id) {
@@ -119,7 +171,53 @@
           </div>`;
       })
       .join("");
+    renderResumePanel();
     showScreen("dashboard-screen");
+  }
+
+  function renderResumePanel() {
+    const saved = loadActiveSession();
+    const panel = $("resume-panel");
+    if (!saved) {
+      panel.hidden = true;
+      return;
+    }
+    const labels = { study: "背题模式", practice: "刷题模式", review: "错题复习", exam: "模拟考试" };
+    const answered = Object.values(saved.responses).filter((response) => response?.submitted).length;
+    const timeText =
+      saved.mode === "exam"
+        ? saved.examEndsAt > Date.now()
+          ? `，剩余约 ${Math.ceil((saved.examEndsAt - Date.now()) / 60000)} 分钟`
+          : "，考试时间已结束"
+        : "";
+    $("resume-title").textContent = `继续${labels[saved.mode] || "上次学习"}`;
+    $("resume-summary").textContent = `上次停在第 ${saved.index + 1} / ${saved.list.length} 题，已作答 ${answered} 题${timeText}`;
+    panel.hidden = false;
+  }
+
+  function resumeActiveSession() {
+    const saved = loadActiveSession();
+    if (!saved) {
+      showToast("没有可恢复的学习记录");
+      dashboard();
+      return;
+    }
+    session = saved;
+    if (session.mode === "exam" && session.examEndsAt <= Date.now()) {
+      showToast("考试时间已结束，正在自动交卷");
+      finishExam();
+      return;
+    }
+    if (session.mode === "exam") startExamTimer();
+    renderQuestion();
+    showScreen("question-screen");
+  }
+
+  function discardActiveSession() {
+    if (!window.confirm("确定放弃当前未完成的学习记录吗？已计入的掌握进度不会撤销。")) return;
+    clearActiveSession();
+    dashboard();
+    showToast("已放弃本轮学习");
   }
 
   function openSetup(mode) {
@@ -173,7 +271,7 @@
 
   function updateSetupSummary() {
     if (setupMode === "exam") {
-      $("setup-summary").innerHTML = "20 单选 × 3 分 + 10 多选 × 3 分 + 10 判断 × 1 分 = <strong>100 分</strong>";
+      $("setup-summary").innerHTML = "限时 <strong>20 分钟</strong> · 20 单选 × 3 分 + 10 多选 × 3 分 + 10 判断 × 1 分 = <strong>100 分</strong>";
       $("start-button").disabled = false;
       return;
     }
@@ -204,6 +302,7 @@
       optionOrders: {},
       initialTotal: list.length,
     };
+    saveActiveSession();
     renderQuestion();
     showScreen("question-screen");
   }
@@ -221,6 +320,7 @@
       optionOrders: {},
       examEndsAt: Date.now() + 20 * 60 * 1000,
     };
+    saveActiveSession();
     startExamTimer();
     renderQuestion();
     showScreen("question-screen");
@@ -240,6 +340,7 @@
       exam: "模拟考试",
     }[session.mode];
     $("exam-timer").hidden = session.mode !== "exam";
+    $("exam-actions").hidden = session.mode !== "exam";
     if (session.mode === "exam") updateExamTimer();
 
     let counter;
@@ -298,6 +399,7 @@
     // 强制浏览器确认初始状态，使每次切题都能重新播放入场动画。
     void questionCard.offsetWidth;
     questionCard.classList.add("question-enter");
+    saveActiveSession();
   }
 
   function renderAnswerModeHint(question) {
@@ -369,11 +471,13 @@
       session.responses[question.id] = { selected: [...session.selected], submitted: false };
       syncSelection();
       $("submit-answer-button").disabled = session.selected.length === 0;
+      saveActiveSession();
       return;
     }
     session.selected = [key];
     session.responses[question.id] = { selected: [...session.selected], submitted: false };
     syncSelection();
+    saveActiveSession();
     submitAnswer();
   }
 
@@ -396,6 +500,7 @@
     };
     session.responses[question.id] = response;
     recordAnswer(question, isCorrect);
+    saveActiveSession();
     $("submit-answer-button").classList.remove("visible");
 
     if (session.mode === "exam") {
@@ -445,6 +550,7 @@
 
     if (session.mode === "review") {
       if (session.list.every((question) => isMastered(question.id))) {
+        clearActiveSession();
         dashboard();
         showToast("🎉 本轮错题已经全部清零");
         return;
@@ -472,6 +578,7 @@
     }
 
     if (session.index >= session.list.length - 1) {
+      clearActiveSession();
       dashboard();
       showToast("本轮刷题已完成");
     } else {
@@ -492,6 +599,7 @@
       progress.studyPositions[session.scopeKey] = session.index;
       saveProgress();
     }
+    saveActiveSession();
     renderQuestion();
   }
 
@@ -524,6 +632,65 @@
 
   function answeredExamCount() {
     return session.list.filter((question) => session.responses[question.id]?.submitted).length;
+  }
+
+  function openAnswerSheet() {
+    if (!session || session.mode !== "exam") return;
+    renderAnswerSheet();
+    $("answer-sheet-overlay").hidden = false;
+    document.body.style.overflow = "hidden";
+  }
+
+  function closeAnswerSheet() {
+    $("answer-sheet-overlay").hidden = true;
+    document.body.style.overflow = "";
+  }
+
+  function renderAnswerSheet() {
+    const answered = answeredExamCount();
+    $("answer-sheet-summary").textContent = `已答 ${answered} 题，未答 ${session.list.length - answered} 题`;
+    const sections = [
+      { title: "单选题 · 1—20", start: 0, end: 20 },
+      { title: "多选题 · 21—30", start: 20, end: 30 },
+      { title: "判断题 · 31—40", start: 30, end: 40 },
+    ];
+    $("answer-sheet-content").innerHTML = sections
+      .map(
+        ({ title, start, end }) => `
+          <section class="answer-sheet-section">
+            <h3>${title}</h3>
+            <div class="answer-sheet-grid">
+              ${session.list
+                .slice(start, end)
+                .map((question, offset) => {
+                  const index = start + offset;
+                  const answeredClass = session.responses[question.id]?.submitted ? "answered" : "";
+                  const currentClass = index === session.index ? "current" : "";
+                  return `<button class="sheet-number ${answeredClass} ${currentClass}" data-sheet-index="${index}" type="button">${index + 1}</button>`;
+                })
+                .join("")}
+            </div>
+          </section>`,
+      )
+      .join("");
+    document.querySelectorAll("[data-sheet-index]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const index = Number(button.dataset.sheetIndex);
+        closeAnswerSheet();
+        goToQuestion(index);
+      });
+    });
+  }
+
+  function requestExamSubmission() {
+    if (!session || session.mode !== "exam") return;
+    const unanswered = session.list.length - answeredExamCount();
+    const message =
+      unanswered > 0
+        ? `还有 ${unanswered} 题未作答，交卷后这些题将按错误计入。确定交卷吗？`
+        : "所有题目均已作答，确定交卷吗？";
+    if (!window.confirm(message)) return;
+    finishExam();
   }
 
   function updateQuestionNavigation() {
@@ -586,6 +753,8 @@
           </article>`;
       })
       .join("");
+    clearActiveSession();
+    closeAnswerSheet();
     showScreen("result-screen");
   }
 
@@ -661,6 +830,7 @@
   function resetProgress() {
     if (!window.confirm("确定清空全部学习记录吗？此操作无法撤销，建议先导出进度。")) return;
     if (!window.confirm("再次确认：969 道题将全部恢复为未掌握。")) return;
+    clearActiveSession();
     progress = defaultState();
     saveProgress();
     dashboard();
@@ -705,6 +875,33 @@
       showToast("考试时间已到，系统已自动交卷");
       finishExam();
     }
+  }
+
+  function setupPwa() {
+    if ("serviceWorker" in navigator && location.protocol !== "file:") {
+      navigator.serviceWorker.register("./sw.js").catch(() => {});
+    }
+    window.addEventListener("beforeinstallprompt", (event) => {
+      event.preventDefault();
+      deferredInstallPrompt = event;
+      $("install-button").hidden = false;
+    });
+    window.addEventListener("appinstalled", () => {
+      deferredInstallPrompt = null;
+      $("install-button").hidden = true;
+      showToast("应用已安装，可从桌面直接打开");
+    });
+  }
+
+  async function installApp() {
+    if (!deferredInstallPrompt) {
+      showToast("可在浏览器菜单中选择“添加到主屏幕”或“安装应用”");
+      return;
+    }
+    deferredInstallPrompt.prompt();
+    await deferredInstallPrompt.userChoice;
+    deferredInstallPrompt = null;
+    $("install-button").hidden = true;
   }
 
   function displayOptionsFor(question) {
@@ -796,11 +993,22 @@
   $("export-button").addEventListener("click", exportProgress);
   $("import-input").addEventListener("change", importProgress);
   $("reset-button").addEventListener("click", resetProgress);
+  $("resume-session-button").addEventListener("click", resumeActiveSession);
+  $("discard-session-button").addEventListener("click", discardActiveSession);
   $("previous-question-button").addEventListener("click", previousQuestion);
   $("next-question-button").addEventListener("click", nextQuestion);
   $("submit-answer-button").addEventListener("click", submitAnswer);
   $("jump-form").addEventListener("submit", jumpToQuestion);
+  $("answer-sheet-button").addEventListener("click", openAnswerSheet);
+  $("close-answer-sheet-button").addEventListener("click", closeAnswerSheet);
+  $("answer-sheet-overlay").addEventListener("click", (event) => {
+    if (event.target === $("answer-sheet-overlay")) closeAnswerSheet();
+  });
+  $("submit-exam-button").addEventListener("click", requestExamSubmission);
+  $("sheet-submit-exam-button").addEventListener("click", requestExamSubmission);
+  $("install-button").addEventListener("click", installApp);
   document.addEventListener("keydown", handleKeydown);
 
+  setupPwa();
   dashboard();
 })();

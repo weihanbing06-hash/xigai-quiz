@@ -3,7 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#c9162b" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>习概学习题库</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="app-icon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -17,6 +22,7 @@
           </span>
         </button>
         <div class="header-actions">
+          <button id="install-button" class="quiet-button" type="button" hidden>安装应用</button>
           <button id="export-button" class="quiet-button" type="button">导出进度</button>
           <label class="quiet-button file-button">
             导入进度
@@ -63,6 +69,18 @@
               <small>17 章 · 3 种题型</small>
             </article>
           </div>
+
+          <section id="resume-panel" class="resume-panel" hidden>
+            <div>
+              <span class="resume-kicker">未完成的学习</span>
+              <strong id="resume-title">继续上次练习</strong>
+              <small id="resume-summary"></small>
+            </div>
+            <div class="resume-actions">
+              <button id="discard-session-button" class="secondary-button" type="button">放弃本轮</button>
+              <button id="resume-session-button" class="primary-button" type="button">继续学习</button>
+            </div>
+          </section>
 
           <div class="mode-grid">
             <button class="mode-card learn" data-mode="study" type="button">
@@ -134,6 +152,10 @@
         <section id="question-screen" class="screen">
           <div class="question-toolbar">
             <button class="back-link" data-action="home" type="button">← 退出本轮</button>
+            <div id="exam-actions" class="exam-actions" hidden>
+              <button id="answer-sheet-button" class="quiet-button compact-button" type="button">答题卡</button>
+              <button id="submit-exam-button" class="danger-button compact-button" type="button">交卷</button>
+            </div>
             <div class="question-progress">
               <div class="mode-status-row">
                 <span id="mode-label"></span>
@@ -185,6 +207,26 @@
         </section>
       </main>
       <footer class="site-credit">寒冰制作</footer>
+    </div>
+
+    <div id="answer-sheet-overlay" class="sheet-overlay" hidden>
+      <section class="answer-sheet-panel" role="dialog" aria-modal="true" aria-labelledby="answer-sheet-title">
+        <div class="answer-sheet-header">
+          <div>
+            <p class="eyebrow">模拟考试</p>
+            <h2 id="answer-sheet-title">答题卡</h2>
+            <p id="answer-sheet-summary"></p>
+          </div>
+          <button id="close-answer-sheet-button" class="sheet-close" type="button" aria-label="关闭答题卡">×</button>
+        </div>
+        <div class="answer-sheet-legend">
+          <span><i class="legend-dot answered"></i>已答</span>
+          <span><i class="legend-dot current"></i>当前</span>
+          <span><i class="legend-dot unanswered"></i>未答</span>
+        </div>
+        <div id="answer-sheet-content" class="answer-sheet-content"></div>
+        <button id="sheet-submit-exam-button" class="primary-button sheet-submit-button" type="button">确认交卷</button>
+      </section>
     </div>
 
     <div id="toast" class="toast" role="status"></div>
