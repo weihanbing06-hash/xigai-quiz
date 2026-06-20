@@ -577,14 +577,58 @@
         const question = questionMap.get(answer.questionId);
         return `
           <article class="review-item ${answer.correct ? "" : "wrong"}">
-            <span class="${answer.correct ? "good" : "bad"}">${answer.correct ? "✅ 正确" : "❌ 错误"} · 第 ${index + 1} 题 · ${question.type}</span>
+            <div class="review-item-heading">
+              <span class="${answer.correct ? "good" : "bad"}">${answer.correct ? "✅ 正确" : "❌ 错误"} · 第 ${index + 1} 题 · ${question.type}</span>
+              <span class="review-answer-summary">你的答案：${answer.selected.length ? escapeHtml(displayAnswerLabel(question, answer.selected)) : "未作答"}　|　正确答案：${escapeHtml(displayAnswerLabel(question))}</span>
+            </div>
             <h3>${escapeHtml(question.stem)}</h3>
-            <p>你的答案：${answer.selected.length ? escapeHtml(displayAnswerLabel(question, answer.selected)) : "未作答"}</p>
-            <p>正确答案：<strong>${escapeHtml(displayAnswerLabel(question))}</strong>　${escapeHtml(displayDetailedAnswer(question))}</p>
+            <div class="review-options">${renderExamReviewOptions(question, answer)}</div>
           </article>`;
       })
       .join("");
     showScreen("result-screen");
+  }
+
+  function renderExamReviewOptions(question, answer) {
+    const options =
+      question.type === "判断题"
+        ? [
+            { key: "T", text: "对", digit: "1" },
+            { key: "F", text: "错", digit: "0" },
+          ]
+        : displayOptionsFor(question).map((option, index) => ({
+            ...option,
+            digit: String(index + 1),
+          }));
+
+    return options
+      .map((option) => {
+        const isCorrect = question.answer.includes(option.key);
+        const isSelected = answer.selected.includes(option.key);
+        const classes = [
+          "review-option",
+          isCorrect ? "correct-choice" : "",
+          isSelected && !isCorrect ? "wrong-choice" : "",
+          isSelected ? "user-choice" : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
+        const state =
+          isCorrect && isSelected
+            ? "你的选择 · 正确"
+            : isCorrect
+              ? "正确答案"
+              : isSelected
+                ? "你的选择 · 错误"
+                : "";
+        return `
+          <div class="${classes}">
+            <span class="review-option-key">${option.digit}</span>
+            <span class="review-option-text">${escapeHtml(option.text)}</span>
+            ${state ? `<span class="review-option-state">${state}</span>` : ""}
+          </div>`;
+      })
+      .join("");
   }
 
   function exportProgress() {
