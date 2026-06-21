@@ -17,6 +17,7 @@
           </span>
         </button>
         <div class="header-actions">
+          <button id="settings-button" class="quiet-button" type="button">设置</button>
           <button id="export-button" class="quiet-button" type="button">导出进度</button>
           <label class="quiet-button file-button">
             导入进度
@@ -221,6 +222,38 @@
         </div>
         <div id="answer-sheet-content" class="answer-sheet-content"></div>
         <button id="sheet-submit-exam-button" class="primary-button sheet-submit-button" type="button">确认交卷</button>
+      </section>
+    </div>
+
+    <div id="settings-overlay" class="sheet-overlay" hidden>
+      <section class="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <div class="answer-sheet-header">
+          <div>
+            <p class="eyebrow">答题偏好</p>
+            <h2 id="settings-title">学习设置</h2>
+            <p>设置仅保存在当前浏览器，不影响其他用户。</p>
+          </div>
+          <button id="close-settings-button" class="sheet-close" type="button" aria-label="关闭设置">×</button>
+        </div>
+        <div class="settings-list">
+          <label class="setting-row">
+            <span>
+              <strong>单选、判断自动提交</strong>
+              <small>选择答案后立即判题；关闭后需要点击提交答案。</small>
+            </span>
+            <input id="auto-submit-setting" class="setting-checkbox" type="checkbox" />
+            <span class="setting-switch" aria-hidden="true"></span>
+          </label>
+          <label class="setting-row">
+            <span>
+              <strong>答对后自动进入下一题</strong>
+              <small>显示正确反馈后自动切题；答错时仍停留查看答案。</small>
+            </span>
+            <input id="auto-next-setting" class="setting-checkbox" type="checkbox" />
+            <span class="setting-switch" aria-hidden="true"></span>
+          </label>
+        </div>
+        <button id="save-settings-button" class="primary-button settings-save-button" type="button">保存设置</button>
       </section>
     </div>
 

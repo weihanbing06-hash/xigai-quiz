@@ -9,6 +9,7 @@
 
   const STORAGE_KEY = "xigai-quiz-progress-v1";
   const SESSION_KEY = "xigai-quiz-active-session-v1";
+  const SETTINGS_KEY = "xigai-quiz-settings-v1";
   const questions = BANK.questions;
   const questionMap = new Map(questions.map((question) => [question.id, question]));
   const chapters = [...new Map(questions.map((q) => [q.chapter, q.chapterTitle])).entries()];
@@ -25,10 +26,12 @@
   });
 
   let progress = loadProgress();
+  let settings = loadSettings();
   let setupMode = null;
   let session = null;
   let toastTimer = null;
   let examTimerInterval = null;
+  let autoNextTimer = null;
 
   const $ = (id) => document.getElementById(id);
   const screens = [...document.querySelectorAll(".screen")];
@@ -72,6 +75,29 @@
   function saveProgress() {
     progress.updatedAt = new Date().toISOString();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
+  }
+
+  function loadSettings() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(SETTINGS_KEY));
+      return {
+        autoSubmit: parsed?.autoSubmit !== false,
+        autoNextCorrect: Boolean(parsed?.autoNextCorrect),
+      };
+    } catch {
+      return { autoSubmit: true, autoNextCorrect: false };
+    }
+  }
+
+  function saveSettings() {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  }
+
+  function cancelAutoNext() {
+    if (autoNextTimer) {
+      window.clearTimeout(autoNextTimer);
+      autoNextTimer = null;
+    }
   }
 
   function saveActiveSession() {
@@ -134,12 +160,14 @@
   }
 
   function clearActiveSession() {
+    cancelAutoNext();
     session = null;
     localStorage.removeItem(SESSION_KEY);
     stopExamTimer();
   }
 
   function showScreen(id) {
+    cancelAutoNext();
     screens.forEach((screen) => screen.classList.toggle("active", screen.id === id));
     window.scrollTo({ top: 0, behavior: "instant" });
   }
@@ -516,9 +544,11 @@
   }
 
   function renderQuestion() {
+    cancelAutoNext();
     const question = session.list[session.index];
     const questionCard = document.querySelector(".question-card");
     questionCard.classList.remove("question-enter");
+    questionCard.classList.remove("result-correct", "result-wrong");
     const response = responseFor();
     session.selected = response ? [...response.selected] : [];
     session.submitted = Boolean(response?.submitted);
@@ -584,9 +614,13 @@
           question.type === "多选题"
             ? "点击选项或按 1—4 选择，按回车提交"
             : question.type === "判断题"
-              ? "点击选项，或按 1 选择“对”、按 0 选择“错”"
-              : "点击选项，或按 1—4 直接作答";
-        if (question.type === "多选题") {
+              ? settings.autoSubmit
+                ? "点击选项，或按 1 选择“对”、按 0 选择“错”，自动提交"
+                : "选择“对”或“错”，确认后点击提交答案"
+              : settings.autoSubmit
+                ? "点击选项，或按 1—4 直接作答并自动提交"
+                : "选择一个选项，确认后点击提交答案";
+        if (question.type === "多选题" || !settings.autoSubmit) {
           $("submit-answer-button").classList.add("visible");
           $("submit-answer-button").disabled = session.selected.length === 0;
         }
@@ -608,9 +642,10 @@
         <span class="answer-mode-icon" aria-hidden="true">✓✓</span>
         <span><strong>多项选择</strong><small>可选择多个选项，确认无误后提交答案</small></span>`;
     } else {
+      const submitDescription = settings.autoSubmit ? "选择一个答案后将立即提交" : "选择答案后，确认无误再提交";
       hint.innerHTML = `
         <span class="answer-mode-icon" aria-hidden="true">→</span>
-        <span><strong>${question.type === "判断题" ? "判断选择" : "单项选择"}</strong><small>选择一个答案后将立即提交</small></span>`;
+        <span><strong>${question.type === "判断题" ? "判断选择" : "单项选择"}</strong><small>${submitDescription}</small></span>`;
     }
   }
 
@@ -688,7 +723,12 @@
     session.responses[responseKey()] = { selected: [...session.selected], submitted: false };
     syncSelection();
     saveActiveSession();
-    submitAnswer();
+    if (settings.autoSubmit) {
+      submitAnswer();
+    } else {
+      $("submit-answer-button").classList.add("visible");
+      $("submit-answer-button").disabled = false;
+    }
   }
 
   function syncSelection() {
@@ -724,9 +764,20 @@
 
     showSubmittedAnswer(question, response);
     updateQuestionNavigation();
+    if (response.correct && settings.autoNextCorrect && session.mode !== "exam") {
+      autoNextTimer = window.setTimeout(() => {
+        autoNextTimer = null;
+        nextQuestion();
+      }, 900);
+    }
   }
 
   function showSubmittedAnswer(question, response) {
+    const questionCard = document.querySelector(".question-card");
+    questionCard.classList.remove("result-correct", "result-wrong");
+    if (session.mode !== "exam") {
+      questionCard.classList.add(response.correct ? "result-correct" : "result-wrong");
+    }
     document.querySelectorAll("[data-answer]").forEach((button) => {
       const key = button.dataset.answer;
       button.disabled = true;
@@ -821,12 +872,14 @@
   }
 
   function previousQuestion() {
+    cancelAutoNext();
     if (!session || session.index <= 0) return;
     if (session.mode === "review") prepareReviewQuestionForRevisit();
     goToQuestion(session.index - 1);
   }
 
   function goToQuestion(index) {
+    cancelAutoNext();
     if (!session || index < 0 || index >= session.list.length) return;
     session.index = index;
     if (session.mode === "study") {
@@ -878,6 +931,30 @@
   function closeAnswerSheet() {
     $("answer-sheet-overlay").hidden = true;
     document.body.style.overflow = "";
+  }
+
+  function openSettings() {
+    cancelAutoNext();
+    $("auto-submit-setting").checked = settings.autoSubmit;
+    $("auto-next-setting").checked = settings.autoNextCorrect;
+    $("settings-overlay").hidden = false;
+    document.body.style.overflow = "hidden";
+  }
+
+  function closeSettings() {
+    $("settings-overlay").hidden = true;
+    document.body.style.overflow = "";
+  }
+
+  function applySettings() {
+    settings = {
+      autoSubmit: $("auto-submit-setting").checked,
+      autoNextCorrect: $("auto-next-setting").checked,
+    };
+    saveSettings();
+    closeSettings();
+    if (session && $("question-screen").classList.contains("active")) renderQuestion();
+    showToast("答题设置已保存");
   }
 
   function renderAnswerSheet() {
@@ -1198,7 +1275,10 @@
     } else if (question.type !== "判断题" && /^[1-9]$/.test(key)) {
       const option = displayOptionsFor(question)[Number(key) - 1];
       if (option) selectAnswer(option.key);
-    } else if (question.type === "多选题" && key === "Enter") {
+    } else if (
+      key === "Enter" &&
+      (question.type === "多选题" || (!settings.autoSubmit && session.selected.length))
+    ) {
       event.preventDefault();
       submitAnswer();
     }
@@ -1218,6 +1298,12 @@
   $("start-button").addEventListener("click", startSession);
   $("retry-exam-button").addEventListener("click", () => openSetup("exam"));
   $("export-button").addEventListener("click", exportProgress);
+  $("settings-button").addEventListener("click", openSettings);
+  $("close-settings-button").addEventListener("click", closeSettings);
+  $("settings-overlay").addEventListener("click", (event) => {
+    if (event.target === $("settings-overlay")) closeSettings();
+  });
+  $("save-settings-button").addEventListener("click", applySettings);
   $("import-input").addEventListener("change", importProgress);
   $("reset-button").addEventListener("click", resetProgress);
   $("resume-session-button").addEventListener("click", resumeActiveSession);
