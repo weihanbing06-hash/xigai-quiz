@@ -83,11 +83,11 @@
               <p>按顺序看题与答案，不重复，键盘翻到下一题。</p>
               <span class="mode-link">开始背题 →</span>
             </button>
-            <button class="mode-card practice" data-mode="practice" type="button">
-              <span class="mode-icon">⌨</span>
-              <strong>刷题模式</strong>
-              <p>按顺序作答，即时判分，答错自动回到错题本。</p>
-              <span class="mode-link">开始刷题 →</span>
+            <button class="mode-card learning" data-mode="learning" type="button">
+              <span class="mode-icon">◎</span>
+              <strong>学习模式</strong>
+              <p>按章节推进新题，穿插错题与旧题，自适应强化薄弱内容。</p>
+              <span class="mode-link">开始学习 →</span>
             </button>
             <button class="mode-card review" data-mode="review" type="button">
               <span class="mode-icon">↻</span>
@@ -136,6 +136,15 @@
                   <option value="判断题">判断题</option>
                 </select>
               </label>
+            </div>
+            <div id="learning-round-field" class="learning-round-field" hidden>
+              <label for="learning-round-size">每轮学习量</label>
+              <select id="learning-round-size">
+                <option value="20">轻量 · 20 题</option>
+                <option value="30" selected>标准 · 30 题</option>
+                <option value="50">强化 · 50 题</option>
+              </select>
+              <small>包含新题与间隔复习题，完成一轮即可休息。</small>
             </div>
 
             <div id="setup-summary" class="setup-summary"></div>
@@ -198,6 +207,21 @@
             <button class="secondary-button" data-action="home" type="button">返回首页</button>
           </div>
           <div id="exam-review-list" class="exam-review-list"></div>
+        </section>
+
+        <section id="learning-result-screen" class="screen">
+          <button class="back-link" data-action="home" type="button">← 返回首页</button>
+          <div class="learning-result-card">
+            <p class="eyebrow">本轮学习完成</p>
+            <div class="learning-result-mark">✓</div>
+            <h1 id="learning-result-title">这一轮，扎扎实实完成了。</h1>
+            <p id="learning-result-message"></p>
+            <div id="learning-result-stats" class="learning-result-stats"></div>
+            <div class="result-actions">
+              <button id="next-learning-round-button" class="primary-button" type="button">再学一轮</button>
+              <button class="secondary-button" data-action="home" type="button">返回首页</button>
+            </div>
+          </div>
         </section>
       </main>
       <footer class="site-credit">寒冰制作</footer>

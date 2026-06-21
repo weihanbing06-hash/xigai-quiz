@@ -19,6 +19,7 @@
     attempts: 0,
     correct: 0,
     studyPositions: {},
+    questionStats: {},
     updatedAt: new Date().toISOString(),
   });
 
@@ -59,6 +60,7 @@
       responses: session.responses || {},
       optionOrders: session.optionOrders || {},
       initialTotal: session.initialTotal || session.list.length,
+      learningState: session.learningState || null,
       examEndsAt: session.examEndsAt || null,
       savedAt: Date.now(),
     };
@@ -72,8 +74,8 @@
       const list = saved.listIds.map((id) => questionMap.get(id)).filter(Boolean);
       if (list.length !== saved.listIds.length) return null;
       return {
-        mode: saved.mode,
-        list,
+        mode: saved.mode === "practice" ? "learning" : saved.mode,
+        list: saved.mode === "practice" ? list.slice(0, Math.min((Number(saved.index) || 0) + 1, list.length)) : list,
         index: Math.min(Math.max(0, Number(saved.index) || 0), list.length - 1),
         scopeKey: saved.scopeKey || "",
         selected: [],
@@ -81,6 +83,21 @@
         responses: saved.responses || {},
         optionOrders: saved.optionOrders || {},
         initialTotal: saved.initialTotal || list.length,
+        learningState:
+          saved.learningState ||
+          (saved.mode === "practice"
+            ? {
+                sourceIds: saved.listIds,
+                nextNewIndex: Math.min((Number(saved.index) || 0) + 1, saved.listIds.length),
+                generated: Math.min((Number(saved.index) || 0) + 1, 30),
+                roundSize: 30,
+                recentIds: saved.listIds.slice(Math.max(0, (Number(saved.index) || 0) - 5), (Number(saved.index) || 0) + 1),
+                itemMeta: saved.listIds
+                  .slice(0, Math.min((Number(saved.index) || 0) + 1, saved.listIds.length))
+                  .map((id) => ({ questionId: id, kind: "new", wasWeak: true })),
+                startMastered: questions.filter((question) => isMastered(question.id)).length,
+              }
+            : null),
         examEndsAt: saved.examEndsAt || null,
         savedAt: saved.savedAt || Date.now(),
       };
@@ -118,13 +135,40 @@
 
   function recordAnswer(question, isCorrect) {
     progress.attempts += 1;
+    const stats = progress.questionStats[question.id] || {
+      attempts: 0,
+      correct: 0,
+      wrong: 0,
+      lastAnsweredAt: 0,
+    };
+    stats.attempts += 1;
+    stats.lastAnsweredAt = Date.now();
+    if (session?.mode === "learning") {
+      stats.learningAttempts = Number(stats.learningAttempts || 0) + 1;
+    }
     if (isCorrect) {
       progress.correct += 1;
+      stats.correct += 1;
       progress.streaks[question.id] = Math.min(2, streakFor(question.id) + 1);
     } else {
+      stats.wrong += 1;
       progress.streaks[question.id] = 0;
     }
+    progress.questionStats[question.id] = stats;
     saveProgress();
+  }
+
+  function responseKey(index = session.index) {
+    const question = session.list[index];
+    return session.mode === "learning" ? `${index}:${question.id}` : question.id;
+  }
+
+  function responseFor(index = session.index) {
+    return session.responses[responseKey(index)];
+  }
+
+  function optionOrderKey(question, index = session.index) {
+    return session.mode === "learning" ? `${index}:${question.id}` : question.id;
   }
 
   function answerLabel(question, answer = question.answer) {
@@ -181,7 +225,7 @@
       panel.hidden = true;
       return;
     }
-    const labels = { study: "背题模式", practice: "刷题模式", review: "错题复习", exam: "模拟考试" };
+    const labels = { study: "背题模式", learning: "学习模式", review: "错题复习", exam: "模拟考试" };
     const answered = Object.values(saved.responses).filter((response) => response?.submitted).length;
     const timeText =
       saved.mode === "exam"
@@ -228,11 +272,11 @@
         description: "题目与正确答案同时显示。按空格、回车或方向右键进入下一题；背题不改变掌握状态。",
         start: "开始背题",
       },
-      practice: {
-        eyebrow: "顺序作答",
-        title: "刷题模式",
-        description: "即时判定对错。单选与判断按数字自动提交，多选选择完毕后按回车提交。",
-        start: "开始刷题",
+      learning: {
+        eyebrow: "自适应巩固",
+        title: "学习模式",
+        description: "新题按章节顺序推进，系统会间隔穿插错题、未掌握题和少量已掌握题，避免只记住答案位置。",
+        start: "开始学习",
       },
       review: {
         eyebrow: "循环强化",
@@ -253,6 +297,7 @@
     $("setup-description").textContent = config.description;
     $("start-button").textContent = config.start;
     $("scope-fields").style.display = mode === "exam" ? "none" : "grid";
+    $("learning-round-field").hidden = mode !== "learning";
     updateSetupSummary();
     showScreen("setup-screen");
   }
@@ -276,30 +321,126 @@
     }
     const list = filteredQuestions();
     const scope = $("chapter-select").value === "全部" ? "全题库" : $("chapter-select").selectedOptions[0].textContent;
+    if (setupMode === "learning") {
+      const roundSize = Number($("learning-round-size").value);
+      $("setup-summary").innerHTML = `<strong>${scope}</strong> · ${$("type-select").value} · 本轮 <strong>${roundSize}</strong> 题，包含新题与间隔复习`;
+      $("start-button").disabled = list.length === 0;
+      return;
+    }
     const suffix = setupMode === "review" ? " 道当前错题" : " 道题";
     $("setup-summary").innerHTML = `<strong>${scope}</strong> · ${$("type-select").value} · 共 <strong>${list.length}</strong>${suffix}`;
     $("start-button").disabled = list.length === 0;
   }
 
+  function createLearningState(source, roundSize) {
+    let nextNewIndex = source.findIndex((question) => {
+      const stats = progress.questionStats[question.id];
+      const seenInLegacyProgress = Object.prototype.hasOwnProperty.call(progress.streaks, question.id);
+      return !stats?.learningAttempts && !seenInLegacyProgress;
+    });
+    if (nextNewIndex < 0) nextNewIndex = source.length;
+    return {
+      sourceIds: source.map((question) => question.id),
+      nextNewIndex,
+      generated: 0,
+      roundSize,
+      recentIds: [],
+      itemMeta: [],
+      startMastered: questions.filter((question) => isMastered(question.id)).length,
+    };
+  }
+
+  function takeNextLearningQuestion(state, source) {
+    const recent = new Set(state.recentIds.slice(-2));
+    const introduced = source.slice(0, state.nextNewIndex);
+    const dueWeak = introduced.filter((question) => !isMastered(question.id) && !recent.has(question.id));
+    const dueMastered = introduced.filter((question) => isMastered(question.id) && !recent.has(question.id));
+    const reviewTurn = state.generated > 0 && state.generated % 4 === 3;
+    const masteredCheckTurn = state.generated > 0 && state.generated % 12 === 11;
+    let selected = null;
+
+    let kind = "new";
+    if (masteredCheckTurn && dueMastered.length) {
+      selected = weightedLearningPick(dueMastered, true);
+      kind = "mastered-check";
+    } else if (reviewTurn && dueWeak.length) {
+      selected = weightedLearningPick(dueWeak, false);
+      kind = "weak-review";
+    } else if (state.nextNewIndex < source.length) {
+      selected = source[state.nextNewIndex];
+      state.nextNewIndex += 1;
+    } else if (dueWeak.length) {
+      selected = weightedLearningPick(dueWeak, false);
+      kind = "weak-review";
+    } else if (dueMastered.length) {
+      selected = weightedLearningPick(dueMastered, true);
+      kind = "mastered-check";
+    } else {
+      selected = source[Math.floor(Math.random() * source.length)];
+      kind = isMastered(selected.id) ? "mastered-check" : "weak-review";
+    }
+
+    state.generated += 1;
+    state.recentIds.push(selected.id);
+    state.recentIds = state.recentIds.slice(-6);
+    state.itemMeta.push({
+      questionId: selected.id,
+      kind,
+      wasWeak: !isMastered(selected.id),
+    });
+    return selected;
+  }
+
+  function weightedLearningPick(candidates, masteredPool) {
+    const weighted = candidates.map((question) => {
+      const stats = progress.questionStats[question.id] || {};
+      const wrong = Number(stats.wrong || 0);
+      const attempts = Number(stats.attempts || 0);
+      const ageHours = stats.lastAnsweredAt ? (Date.now() - stats.lastAnsweredAt) / 3600000 : 24;
+      const weight = masteredPool
+        ? 1 + Math.min(2, ageHours / 24)
+        : 3 + wrong * 2 + (streakFor(question.id) === 0 ? 3 : 1) + Math.min(2, ageHours / 12) - Math.min(1, attempts / 20);
+      return { question, weight: Math.max(0.5, weight) };
+    });
+    const total = weighted.reduce((sum, item) => sum + item.weight, 0);
+    let roll = Math.random() * total;
+    for (const item of weighted) {
+      roll -= item.weight;
+      if (roll <= 0) return item.question;
+    }
+    return weighted[weighted.length - 1].question;
+  }
+
   function startSession() {
     if (setupMode === "exam") return startExam();
-    const list = filteredQuestions();
-    if (!list.length) return;
+    const source = filteredQuestions();
+    if (!source.length) return;
     const scopeKey = `${$("chapter-select").value}|${$("type-select").value}`;
     let index = 0;
     if (setupMode === "study") {
-      index = Math.min(progress.studyPositions[scopeKey] || 0, Math.max(0, list.length - 1));
+      index = Math.min(progress.studyPositions[scopeKey] || 0, Math.max(0, source.length - 1));
     }
+    const learningState =
+      setupMode === "learning"
+        ? createLearningState(source, Number($("learning-round-size").value))
+        : null;
+    const list =
+      setupMode === "learning"
+        ? [takeNextLearningQuestion(learningState, source)]
+        : setupMode === "review"
+          ? [...source]
+          : source;
     session = {
       mode: setupMode,
-      list: setupMode === "review" ? [...list] : list,
+      list,
       index,
       scopeKey,
       selected: [],
       submitted: false,
       responses: {},
       optionOrders: {},
-      initialTotal: list.length,
+      initialTotal: source.length,
+      learningState,
     };
     saveActiveSession();
     renderQuestion();
@@ -329,12 +470,12 @@
     const question = session.list[session.index];
     const questionCard = document.querySelector(".question-card");
     questionCard.classList.remove("question-enter");
-    const response = session.responses[question.id];
+    const response = responseFor();
     session.selected = response ? [...response.selected] : [];
     session.submitted = Boolean(response?.submitted);
     $("mode-label").textContent = {
       study: "背题模式",
-      practice: "刷题模式",
+      learning: "学习模式",
       review: "错题复习",
       exam: "模拟考试",
     }[session.mode];
@@ -344,7 +485,10 @@
 
     let counter;
     let progressValue;
-    if (session.mode === "review") {
+    if (session.mode === "learning") {
+      counter = `本轮 ${session.index + 1} / ${session.learningState.roundSize} · 主线推进中`;
+      progressValue = ((session.index + 1) / session.learningState.roundSize) * 100;
+    } else if (session.mode === "review") {
       const remaining = session.list.filter((q) => !isMastered(q.id)).length;
       counter = `待掌握 ${remaining} 题`;
       progressValue = ((session.initialTotal - remaining) / session.initialTotal) * 100;
@@ -467,14 +611,14 @@
       session.selected = session.selected.includes(key)
         ? session.selected.filter((item) => item !== key)
         : [...session.selected, key];
-      session.responses[question.id] = { selected: [...session.selected], submitted: false };
+      session.responses[responseKey()] = { selected: [...session.selected], submitted: false };
       syncSelection();
       $("submit-answer-button").disabled = session.selected.length === 0;
       saveActiveSession();
       return;
     }
     session.selected = [key];
-    session.responses[question.id] = { selected: [...session.selected], submitted: false };
+    session.responses[responseKey()] = { selected: [...session.selected], submitted: false };
     syncSelection();
     saveActiveSession();
     submitAnswer();
@@ -497,7 +641,7 @@
       submitted: true,
       correct: isCorrect,
     };
-    session.responses[question.id] = response;
+    session.responses[responseKey()] = response;
     recordAnswer(question, isCorrect);
     saveActiveSession();
     $("submit-answer-button").classList.remove("visible");
@@ -560,6 +704,22 @@
       return;
     }
 
+    if (session.mode === "learning") {
+      const isAtTail = session.index === session.list.length - 1;
+      if (!isAtTail) {
+        goToQuestion(session.index + 1);
+        return;
+      }
+      if (session.list.length >= session.learningState.roundSize) {
+        finishLearningRound();
+        return;
+      }
+      const source = session.learningState.sourceIds.map((id) => questionMap.get(id)).filter(Boolean);
+      session.list.push(takeNextLearningQuestion(session.learningState, source));
+      goToQuestion(session.index + 1);
+      return;
+    }
+
     if (session.mode === "exam") {
       const answered = answeredExamCount();
       if (session.index >= session.list.length - 1) {
@@ -579,7 +739,7 @@
     if (session.index >= session.list.length - 1) {
       clearActiveSession();
       dashboard();
-      showToast("本轮刷题已完成");
+      showToast("本轮学习已完成");
     } else {
       goToQuestion(session.index + 1);
     }
@@ -589,6 +749,51 @@
     if (!session || session.index <= 0) return;
     if (session.mode === "review") prepareReviewQuestionForRevisit();
     goToQuestion(session.index - 1);
+  }
+
+  function finishLearningRound() {
+    const state = session.learningState;
+    const results = session.list.map((question, index) => ({
+      question,
+      response: session.responses[`${index}:${question.id}`],
+      meta: state.itemMeta[index] || { kind: "new", wasWeak: !isMastered(question.id) },
+    }));
+    const answered = results.filter((item) => item.response?.submitted);
+    const correctCount = answered.filter((item) => item.response.correct).length;
+    const newCount = results.filter((item) => item.meta.kind === "new").length;
+    const reviewCount = results.length - newCount;
+    const correctedCount = results.filter(
+      (item) => item.meta.wasWeak && item.meta.kind !== "new" && item.response?.correct,
+    ).length;
+    const masteredNow = questions.filter((question) => isMastered(question.id)).length;
+    const newlyMastered = Math.max(0, masteredNow - Number(state.startMastered || 0));
+    const accuracy = answered.length ? Math.round((correctCount / answered.length) * 100) : 0;
+
+    $("learning-result-title").textContent =
+      accuracy >= 85
+        ? "这一轮掌握得很稳。"
+        : accuracy >= 65
+          ? "这一轮，扎扎实实完成了。"
+          : "完成本身就是有效推进。";
+    $("learning-result-message").textContent =
+      correctedCount > 0
+        ? `本轮答对 ${correctCount} 题，并成功纠正 ${correctedCount} 次薄弱题。系统会继续降低已掌握题频率，把时间留给真正需要强化的内容。`
+        : `本轮答对 ${correctCount} 题，推进 ${newCount} 道主线题。暂时答错的题已经重新进入强化队列，下轮会在合适的间隔再次出现。`;
+    $("learning-result-stats").innerHTML = [
+      [correctCount, `答对题目 · ${accuracy}%`],
+      [newCount, "主线新题"],
+      [reviewCount, "间隔复习"],
+      [correctedCount, "纠正薄弱题"],
+      [newlyMastered, "新增掌握"],
+    ]
+      .map(
+        ([value, label]) =>
+          `<div class="learning-result-stat"><strong>${value}</strong><span>${label}</span></div>`,
+      )
+      .join("");
+
+    clearActiveSession();
+    showScreen("learning-result-screen");
   }
 
   function goToQuestion(index) {
@@ -699,10 +904,16 @@
     $("jump-total").textContent = `/ ${session.list.length}`;
 
     const nextButton = $("next-question-button");
-    nextButton.disabled = session.mode === "study" && session.index >= session.list.length - 1;
+    nextButton.disabled =
+      (session.mode === "study" && session.index >= session.list.length - 1) ||
+      (session.mode === "learning" && !session.submitted);
     if (session.mode === "exam" && session.index >= session.list.length - 1) {
       nextButton.textContent = answeredExamCount() === session.list.length ? "交卷 ✓" : "查找未答题 →";
-    } else if (session.mode === "practice" && session.index >= session.list.length - 1) {
+    } else if (
+      session.mode === "learning" &&
+      session.index >= session.list.length - 1 &&
+      session.list.length >= session.learningState.roundSize
+    ) {
       nextButton.textContent = "完成本轮 ✓";
     } else {
       nextButton.textContent = "下一题 →";
@@ -897,16 +1108,17 @@
 
   function displayOptionsFor(question) {
     if (question.type === "判断题") return [];
-    if (!session.optionOrders[question.id]) {
-      session.optionOrders[question.id] = shuffle(question.options.map((option) => option.key));
+    const key = optionOrderKey(question);
+    if (!session.optionOrders[key]) {
+      session.optionOrders[key] = shuffle(question.options.map((option) => option.key));
     }
-    const order = session.optionOrders[question.id];
+    const order = session.optionOrders[key];
     return order.map((key) => question.options.find((option) => option.key === key));
   }
 
   function displayAnswerLabel(question, answer = question.answer) {
     if (question.type === "判断题") return answerLabel(question, answer);
-    const order = session.optionOrders[question.id] || question.options.map((option) => option.key);
+    const order = session.optionOrders[optionOrderKey(question)] || question.options.map((option) => option.key);
     return answer
       .map((key) => order.indexOf(key) + 1)
       .filter((position) => position > 0)
@@ -979,8 +1191,10 @@
   $("home-button").addEventListener("click", dashboard);
   $("chapter-select").addEventListener("change", updateSetupSummary);
   $("type-select").addEventListener("change", updateSetupSummary);
+  $("learning-round-size").addEventListener("change", updateSetupSummary);
   $("start-button").addEventListener("click", startSession);
   $("retry-exam-button").addEventListener("click", () => openSetup("exam"));
+  $("next-learning-round-button").addEventListener("click", () => openSetup("learning"));
   $("export-button").addEventListener("click", exportProgress);
   $("import-input").addEventListener("change", importProgress);
   $("reset-button").addEventListener("click", resetProgress);
