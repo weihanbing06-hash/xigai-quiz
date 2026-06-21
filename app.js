@@ -214,6 +214,10 @@
     return streakFor(id) >= 2;
   }
 
+  function isStableMastered(id) {
+    return streakFor(id) >= 5;
+  }
+
   function isMistake(id) {
     return Boolean(progress.mistakes[id]);
   }
@@ -248,7 +252,7 @@
     if (isCorrect) {
       progress.correct += 1;
       stats.correct += 1;
-      progress.streaks[question.id] = Math.min(2, streakFor(question.id) + 1);
+      progress.streaks[question.id] = Math.min(5, streakFor(question.id) + 1);
       if (progress.streaks[question.id] >= 2) delete progress.mistakes[question.id];
     } else {
       stats.wrong += 1;
@@ -256,7 +260,24 @@
       progress.mistakes[question.id] = true;
     }
     progress.questionStats[question.id] = stats;
+    updateLearningReviewSchedule(question, isCorrect);
     saveProgress();
+  }
+
+  function reviewIntervalFor(streak) {
+    return [4, 5, 10, 20, 40][Math.max(0, Math.min(4, streak))];
+  }
+
+  function updateLearningReviewSchedule(question, isCorrect) {
+    if (session?.mode !== "learning" || !session.learningState) return;
+    const state = session.learningState;
+    state.reviewDueAt ||= {};
+    if (isCorrect && isStableMastered(question.id)) {
+      delete state.reviewDueAt[question.id];
+      return;
+    }
+    const interval = isCorrect ? reviewIntervalFor(streakFor(question.id)) : 4;
+    state.reviewDueAt[question.id] = state.generated + interval;
   }
 
   function responseKey(index = session.index) {
@@ -379,7 +400,7 @@
       learning: {
         eyebrow: "自适应巩固",
         title: "学习模式",
-        description: "新题按章节顺序推进，系统会间隔穿插错题、未掌握题和少量已掌握题，避免只记住答案位置。",
+        description: "新题按章节顺序推进，系统会根据掌握程度动态安排旧题复习，减少无效重复。",
         start: "开始学习",
       },
       review: {
@@ -425,7 +446,7 @@
     const list = filteredQuestions();
     const scope = $("chapter-select").value === "全部" ? "全题库" : $("chapter-select").selectedOptions[0].textContent;
     if (setupMode === "learning") {
-      $("setup-summary").innerHTML = `<strong>${scope}</strong> · ${$("type-select").value} · 新题按章节顺序推进，并间隔穿插旧题复习`;
+      $("setup-summary").innerHTML = `<strong>${scope}</strong> · ${$("type-select").value} · 新题顺序推进，并动态穿插需要巩固的旧题`;
       $("start-button").disabled = list.length === 0;
       return;
     }
@@ -441,51 +462,66 @@
       return !stats?.learningAttempts && !seenInLegacyProgress;
     });
     if (nextNewIndex < 0) nextNewIndex = source.length;
-    return {
+    const state = {
       sourceIds: source.map((question) => question.id),
       nextNewIndex,
       generated: 0,
       recentIds: [],
+      recentKinds: [],
+      reviewDueAt: {},
       itemMeta: [],
     };
+    for (const question of source.slice(0, nextNewIndex)) {
+      if (isStableMastered(question.id)) continue;
+      state.reviewDueAt[question.id] = isMistake(question.id) ? 4 : reviewIntervalFor(streakFor(question.id));
+    }
+    return state;
   }
 
   function takeNextLearningQuestion(state, source) {
+    normalizeLearningState(state, source);
     const recent = new Set(state.recentIds.slice(-2));
     const introduced = source.slice(0, state.nextNewIndex);
-    const dueMistakes = introduced.filter((question) => isMistake(question.id) && !recent.has(question.id));
-    const dueLearning = introduced.filter(
-      (question) => !isMastered(question.id) && !isMistake(question.id) && hasLearned(question.id) && !recent.has(question.id),
+    const nextPosition = state.generated + 1;
+    const due = introduced.filter(
+      (question) =>
+        !isStableMastered(question.id) &&
+        !recent.has(question.id) &&
+        Number(state.reviewDueAt[question.id] || Infinity) <= nextPosition,
     );
-    const dueMastered = introduced.filter((question) => isMastered(question.id) && !recent.has(question.id));
-    const reviewTurn = state.generated > 0 && state.generated % 4 === 3;
-    const masteredCheckTurn = state.generated > 0 && state.generated % 12 === 11;
+    const dueMistakes = due.filter((question) => isMistake(question.id));
+    const dueOthers = due.filter((question) => !isMistake(question.id));
+    const newSinceReview = [...state.recentKinds].reverse().findIndex((kind) => kind !== "new");
+    const newGap = newSinceReview < 0 ? state.recentKinds.length : newSinceReview;
+    const canReview = due.length > 0 && (newGap >= 3 || (dueMistakes.length > 0 && newGap >= 2));
+    const hasNew = state.nextNewIndex < source.length;
     let selected = null;
 
     let kind = "new";
-    if (masteredCheckTurn && dueMastered.length) {
-      selected = weightedLearningPick(dueMastered, true);
-      kind = "mastered-check";
-    } else if (reviewTurn && (dueMistakes.length || dueLearning.length)) {
-      selected = weightedLearningPick(dueMistakes.length ? dueMistakes : dueLearning, false);
-      kind = "weak-review";
-    } else if (state.nextNewIndex < source.length) {
+    if (canReview) {
+      selected = pickDueLearningQuestion(dueMistakes.length ? dueMistakes : dueOthers, state);
+      kind = isMistake(selected.id) ? "weak-review" : isMastered(selected.id) ? "mastered-check" : "learning-review";
+    } else if (hasNew) {
       selected = source[state.nextNewIndex];
       state.nextNewIndex += 1;
-    } else if (dueMistakes.length || dueLearning.length) {
-      selected = weightedLearningPick(dueMistakes.length ? dueMistakes : dueLearning, false);
-      kind = "weak-review";
-    } else if (dueMastered.length) {
-      selected = weightedLearningPick(dueMastered, true);
-      kind = "mastered-check";
+    } else if (due.length) {
+      selected = pickDueLearningQuestion(dueMistakes.length ? dueMistakes : dueOthers, state);
+      kind = isMistake(selected.id) ? "weak-review" : isMastered(selected.id) ? "mastered-check" : "learning-review";
     } else {
-      selected = source[Math.floor(Math.random() * source.length)];
-      kind = isMastered(selected.id) ? "mastered-check" : "weak-review";
+      const waiting = introduced
+        .filter((question) => !isStableMastered(question.id) && !recent.has(question.id))
+        .sort((a, b) => Number(state.reviewDueAt[a.id]) - Number(state.reviewDueAt[b.id]));
+      if (!waiting.length) return null;
+      selected = waiting[0];
+      state.generated = Math.max(state.generated, Number(state.reviewDueAt[selected.id]) - 1);
+      kind = isMistake(selected.id) ? "weak-review" : isMastered(selected.id) ? "mastered-check" : "learning-review";
     }
 
     state.generated += 1;
     state.recentIds.push(selected.id);
     state.recentIds = state.recentIds.slice(-6);
+    state.recentKinds.push(kind);
+    state.recentKinds = state.recentKinds.slice(-12);
     state.itemMeta.push({
       questionId: selected.id,
       kind,
@@ -494,24 +530,31 @@
     return selected;
   }
 
-  function weightedLearningPick(candidates, masteredPool) {
-    const weighted = candidates.map((question) => {
-      const stats = progress.questionStats[question.id] || {};
-      const wrong = Number(stats.wrong || 0);
-      const attempts = Number(stats.attempts || 0);
-      const ageHours = stats.lastAnsweredAt ? (Date.now() - stats.lastAnsweredAt) / 3600000 : 24;
-      const weight = masteredPool
-        ? 1 + Math.min(2, ageHours / 24)
-        : 3 + wrong * 2 + (streakFor(question.id) === 0 ? 3 : 1) + Math.min(2, ageHours / 12) - Math.min(1, attempts / 20);
-      return { question, weight: Math.max(0.5, weight) };
-    });
-    const total = weighted.reduce((sum, item) => sum + item.weight, 0);
-    let roll = Math.random() * total;
-    for (const item of weighted) {
-      roll -= item.weight;
-      if (roll <= 0) return item.question;
+  function normalizeLearningState(state, source) {
+    state.recentIds ||= [];
+    state.recentKinds ||= [];
+    state.reviewDueAt ||= {};
+    state.itemMeta ||= [];
+    state.generated = Number(state.generated || 0);
+    for (const question of source.slice(0, state.nextNewIndex)) {
+      if (isStableMastered(question.id)) {
+        delete state.reviewDueAt[question.id];
+      } else if (!Number.isFinite(Number(state.reviewDueAt[question.id]))) {
+        state.reviewDueAt[question.id] =
+          state.generated + (isMistake(question.id) ? 4 : reviewIntervalFor(streakFor(question.id)));
+      }
     }
-    return weighted[weighted.length - 1].question;
+  }
+
+  function pickDueLearningQuestion(candidates, state) {
+    return [...candidates].sort((a, b) => {
+      const dueDifference = Number(state.reviewDueAt[a.id]) - Number(state.reviewDueAt[b.id]);
+      if (dueDifference) return dueDifference;
+      const wrongDifference =
+        Number(progress.questionStats[b.id]?.wrong || 0) - Number(progress.questionStats[a.id]?.wrong || 0);
+      if (wrongDifference) return wrongDifference;
+      return streakFor(a.id) - streakFor(b.id);
+    })[0];
   }
 
   function startSession() {
@@ -529,10 +572,14 @@
         : null;
     const list =
       setupMode === "learning"
-        ? [takeNextLearningQuestion(learningState, source)]
+        ? [takeNextLearningQuestion(learningState, source)].filter(Boolean)
         : setupMode === "review"
           ? [...source]
           : source;
+    if (!list.length) {
+      showToast("当前范围内的题目均已稳定掌握");
+      return;
+    }
     session = {
       mode: setupMode,
       list,
@@ -833,7 +880,9 @@
     const feedback = $("feedback");
     feedback.className = `feedback visible ${response.correct ? "correct" : "wrong"}`;
     if (response.correct) {
-      const message = isMastered(question.id)
+      const message = isStableMastered(question.id)
+        ? "该题已进入稳定掌握状态，之后将减少无效重复。"
+        : isMastered(question.id)
         ? response.wasMistake
           ? "该题已连续答对两次，标记为已掌握并移出错题本。"
           : "该题已连续答对两次，标记为已掌握。"
@@ -878,7 +927,14 @@
         return;
       }
       const source = session.learningState.sourceIds.map((id) => questionMap.get(id)).filter(Boolean);
-      session.list.push(takeNextLearningQuestion(session.learningState, source));
+      const next = takeNextLearningQuestion(session.learningState, source);
+      if (!next) {
+        clearActiveSession();
+        dashboard();
+        showToast("🎉 当前范围内的题目均已稳定掌握");
+        return;
+      }
+      session.list.push(next);
       goToQuestion(session.index + 1);
       return;
     }
