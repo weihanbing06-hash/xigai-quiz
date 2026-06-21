@@ -859,26 +859,29 @@
   function showSubmittedAnswer(question, response) {
     const questionCard = document.querySelector(".question-card");
     questionCard.classList.remove("result-correct", "result-wrong");
-    if (session.mode !== "exam") {
-      questionCard.classList.add(response.correct ? "result-correct" : "result-wrong");
-    }
+    questionCard.classList.add(response.correct ? "result-correct" : "result-wrong");
     document.querySelectorAll("[data-answer]").forEach((button) => {
       const key = button.dataset.answer;
+      const isCorrectOption = question.answer.includes(key);
+      const isSelectedOption = response.selected.includes(key);
       button.disabled = true;
-      button.classList.toggle("selected", response.selected.includes(key));
-      if (session.mode !== "exam") {
-        if (question.answer.includes(key)) button.classList.add("correct");
-        if (response.selected.includes(key) && !question.answer.includes(key)) button.classList.add("wrong");
-      }
+      button.classList.toggle("selected", isSelectedOption);
+      if (isCorrectOption && isSelectedOption) button.classList.add("correct");
+      if (!isCorrectOption && isSelectedOption) button.classList.add("wrong");
+      if (isCorrectOption && !isSelectedOption && !response.correct) button.classList.add("missed");
     });
-
-    if (session.mode === "exam") {
-      $("keyboard-hint").textContent = "已作答，可使用下方按钮检查其他题目；交卷前不显示答案";
-      return;
-    }
 
     const feedback = $("feedback");
     feedback.className = `feedback visible ${response.correct ? "correct" : "wrong"}`;
+    if (session.mode === "exam") {
+      const selectedAnswer = displayAnswerLabel(question, response.selected);
+      feedback.innerHTML = response.correct
+        ? `✅ 回答正确！你的答案：${escapeHtml(selectedAnswer)}`
+        : `❌ 回答错误。你的答案：${escapeHtml(selectedAnswer)}　正确答案：${escapeHtml(displayAnswerLabel(question))}　${escapeHtml(displayDetailedAnswer(question))}`;
+      $("keyboard-hint").textContent = `答案已确认，点击“下一题”或按 ${keyLabel(settings.keyBindings.next)} 继续`;
+      return;
+    }
+
     if (response.correct) {
       const message = isStableMastered(question.id)
         ? "该题已进入稳定掌握状态，之后将减少无效重复。"
@@ -1271,10 +1274,12 @@
       .map((option) => {
         const isCorrect = question.answer.includes(option.key);
         const isSelected = answer.selected.includes(option.key);
+        const isMissed = isCorrect && !isSelected;
         const classes = [
           "review-option",
-          isCorrect ? "correct-choice" : "",
+          isCorrect && isSelected ? "correct-choice" : "",
           isSelected && !isCorrect ? "wrong-choice" : "",
+          isMissed ? "missed-choice" : "",
           isSelected ? "user-choice" : "",
         ]
           .filter(Boolean)
@@ -1282,8 +1287,8 @@
         const state =
           isCorrect && isSelected
             ? "你的选择 · 正确"
-            : isCorrect
-              ? "正确答案"
+            : isMissed
+              ? "漏选 · 正确答案"
               : isSelected
                 ? "你的选择 · 错误"
                 : "";

@@ -550,10 +550,37 @@ select { width: 100%; border: 1px solid var(--line); border-radius: 12px; paddin
   border-color: var(--green);
   background: var(--green);
 }
+.question-card.result-wrong button.option.wrong,
+.question-card.result-wrong button.option.missed {
+  color: #a81022;
+  border-color: var(--red);
+  background: var(--red-soft);
+}
+.question-card.result-wrong button.option.missed {
+  background: repeating-linear-gradient(135deg, #fff0f2 0, #fff0f2 12px, #fff8f9 12px, #fff8f9 24px);
+}
+.question-card.result-wrong button.option.wrong .option-key,
+.question-card.result-wrong button.option.missed .option-key {
+  color: #fff;
+  border-color: var(--red);
+  background: var(--red);
+  box-shadow: 0 6px 14px rgba(226,45,64,.18);
+}
 .option.wrong {
   border-color: var(--red);
   background: var(--red-soft);
   animation: wrongOptionShake 360ms ease-out;
+}
+.option.missed {
+  color: #a81022;
+  border-color: var(--red);
+  background: repeating-linear-gradient(135deg, #fff0f2 0, #fff0f2 12px, #fff8f9 12px, #fff8f9 24px);
+  animation: wrongOptionShake 360ms ease-out;
+}
+.option.missed .option-key {
+  color: #fff;
+  border-color: var(--red);
+  background: var(--red);
 }
 .option:disabled { color: inherit; cursor: default; }
 .answer-reveal { padding: 18px; border-left: 5px solid var(--green); border-radius: 10px; background: var(--green-soft); line-height: 1.7; }
@@ -705,7 +732,13 @@ select { width: 100%; border: 1px solid var(--line); border-radius: 12px; paddin
   border-color: #efb2ba;
   background: var(--red-soft);
 }
-.review-option.wrong-choice .review-option-key {
+.review-option.missed-choice {
+  color: #a81022;
+  border-color: #ef9da9;
+  background: repeating-linear-gradient(135deg, #fff0f2 0, #fff0f2 12px, #fff8f9 12px, #fff8f9 24px);
+}
+.review-option.wrong-choice .review-option-key,
+.review-option.missed-choice .review-option-key {
   color: #fff;
   background: var(--red);
 }
