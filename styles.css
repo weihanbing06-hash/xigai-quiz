@@ -362,6 +362,11 @@ select { width: 100%; border: 1px solid var(--line); border-radius: 12px; paddin
 
 .question-meta { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; }
 .type-badge { padding: 5px 9px; border-radius: 7px; color: var(--red-dark); background: var(--red-soft); font-weight: 800; }
+.learning-status-badge { padding: 5px 9px; border-radius: 7px; font-weight: 800; }
+.learning-status-badge.unseen { color: #737986; background: #efede8; }
+.learning-status-badge.learning { color: #9b5c00; background: #fff2d7; }
+.learning-status-badge.mastered { color: #007a4e; background: var(--green-soft); }
+.learning-status-badge.mistake { color: #bd1124; background: var(--red-soft); }
 .question-multiple .type-badge { color: #214fc2; background: #eaf0ff; }
 .question-judge .type-badge { color: #9b5c00; background: #fff2d7; }
 .question-card h2 { margin: 24px 0; white-space: pre-line; font-size: clamp(20px, 3vw, 28px); line-height: 1.55; }

@@ -20,6 +20,7 @@
     correct: 0,
     studyPositions: {},
     questionStats: {},
+    mistakes: {},
     updatedAt: new Date().toISOString(),
   });
 
@@ -35,10 +36,37 @@
   function loadProgress() {
     try {
       const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY));
-      return parsed?.version === 1 ? { ...defaultState(), ...parsed } : defaultState();
+      return parsed?.version === 1 ? normalizeProgress(parsed) : defaultState();
     } catch {
       return defaultState();
     }
+  }
+
+  function normalizeProgress(parsed) {
+    const normalized = { ...defaultState(), ...parsed };
+    normalized.streaks = { ...(parsed.streaks || {}) };
+    normalized.questionStats = { ...(parsed.questionStats || {}) };
+    normalized.mistakes = { ...(parsed.mistakes || {}) };
+    if (!parsed.mistakes) {
+      for (const question of questions) {
+        const hasStreak = Object.prototype.hasOwnProperty.call(normalized.streaks, question.id);
+        const stats = normalized.questionStats[question.id];
+        if (
+          streakForFrom(normalized, question.id) < 2 &&
+          ((hasStreak && Number(normalized.streaks[question.id]) === 0) || Number(stats?.wrong || 0) > 0)
+        ) {
+          normalized.mistakes[question.id] = true;
+        }
+      }
+    }
+    for (const id of Object.keys(normalized.mistakes)) {
+      if (streakForFrom(normalized, id) >= 2) delete normalized.mistakes[id];
+    }
+    return normalized;
+  }
+
+  function streakForFrom(state, id) {
+    return Number(state.streaks?.[id] || 0);
   }
 
   function saveProgress() {
@@ -132,6 +160,24 @@
     return streakFor(id) >= 2;
   }
 
+  function isMistake(id) {
+    return Boolean(progress.mistakes[id]);
+  }
+
+  function hasLearned(id) {
+    return (
+      Object.prototype.hasOwnProperty.call(progress.streaks, id) ||
+      Number(progress.questionStats[id]?.attempts || 0) > 0
+    );
+  }
+
+  function learningStatus(id) {
+    if (isMastered(id)) return "mastered";
+    if (isMistake(id)) return "mistake";
+    if (hasLearned(id)) return "learning";
+    return "unseen";
+  }
+
   function recordAnswer(question, isCorrect) {
     progress.attempts += 1;
     const stats = progress.questionStats[question.id] || {
@@ -149,9 +195,11 @@
       progress.correct += 1;
       stats.correct += 1;
       progress.streaks[question.id] = Math.min(2, streakFor(question.id) + 1);
+      if (progress.streaks[question.id] >= 2) delete progress.mistakes[question.id];
     } else {
       stats.wrong += 1;
       progress.streaks[question.id] = 0;
+      progress.mistakes[question.id] = true;
     }
     progress.questionStats[question.id] = stats;
     saveProgress();
@@ -192,11 +240,14 @@
   function dashboard() {
     stopExamTimer();
     const mastered = questions.filter((q) => isMastered(q.id)).length;
+    const mistakes = questions.filter((q) => isMistake(q.id)).length;
+    const learning = questions.filter((q) => hasLearned(q.id) && !isMastered(q.id)).length;
+    const unseen = questions.length - mastered - learning;
     const percent = Math.round((mastered / questions.length) * 100);
     $("mastered-count").textContent = mastered;
-    $("wrong-count").textContent = questions.length - mastered;
-    $("attempt-count").textContent = progress.attempts;
-    $("accuracy-label").textContent = `正确率 ${progress.attempts ? Math.round((progress.correct / progress.attempts) * 100) : 0}%`;
+    $("wrong-count").textContent = mistakes;
+    $("learning-count").textContent = learning;
+    $("unseen-count").textContent = unseen;
     $("mastery-percent").textContent = `${percent}%`;
     $("mastery-ring").style.setProperty("--progress", `${percent}%`);
 
@@ -280,7 +331,7 @@
       review: {
         eyebrow: "循环强化",
         title: "错题复习",
-        description: "只练尚未连续答对两次的题。未掌握题会循环回到队尾，直至本轮范围全部清零。",
+        description: "只练实际答错并进入错题本的题。连续答对两次后移出，之后若再次答错会重新加入。",
         start: "开始清错题",
       },
       exam: {
@@ -306,7 +357,7 @@
     return questions.filter((q) => {
       if (chapter !== "全部" && q.chapter !== chapter) return false;
       if (type !== "全部" && q.type !== type) return false;
-      if (mode === "review" && isMastered(q.id)) return false;
+      if (mode === "review" && !isMistake(q.id)) return false;
       return true;
     });
   }
@@ -348,7 +399,10 @@
   function takeNextLearningQuestion(state, source) {
     const recent = new Set(state.recentIds.slice(-2));
     const introduced = source.slice(0, state.nextNewIndex);
-    const dueWeak = introduced.filter((question) => !isMastered(question.id) && !recent.has(question.id));
+    const dueMistakes = introduced.filter((question) => isMistake(question.id) && !recent.has(question.id));
+    const dueLearning = introduced.filter(
+      (question) => !isMastered(question.id) && !isMistake(question.id) && hasLearned(question.id) && !recent.has(question.id),
+    );
     const dueMastered = introduced.filter((question) => isMastered(question.id) && !recent.has(question.id));
     const reviewTurn = state.generated > 0 && state.generated % 4 === 3;
     const masteredCheckTurn = state.generated > 0 && state.generated % 12 === 11;
@@ -358,14 +412,14 @@
     if (masteredCheckTurn && dueMastered.length) {
       selected = weightedLearningPick(dueMastered, true);
       kind = "mastered-check";
-    } else if (reviewTurn && dueWeak.length) {
-      selected = weightedLearningPick(dueWeak, false);
+    } else if (reviewTurn && (dueMistakes.length || dueLearning.length)) {
+      selected = weightedLearningPick(dueMistakes.length ? dueMistakes : dueLearning, false);
       kind = "weak-review";
     } else if (state.nextNewIndex < source.length) {
       selected = source[state.nextNewIndex];
       state.nextNewIndex += 1;
-    } else if (dueWeak.length) {
-      selected = weightedLearningPick(dueWeak, false);
+    } else if (dueMistakes.length || dueLearning.length) {
+      selected = weightedLearningPick(dueMistakes.length ? dueMistakes : dueLearning, false);
       kind = "weak-review";
     } else if (dueMastered.length) {
       selected = weightedLearningPick(dueMastered, true);
@@ -489,7 +543,7 @@
           : `主线已完成 · 持续巩固 ${session.index + 1}`;
       progressValue = total ? (learned / total) * 100 : 100;
     } else if (session.mode === "review") {
-      const remaining = session.list.filter((q) => !isMastered(q.id)).length;
+      const remaining = session.list.filter((q) => isMistake(q.id)).length;
       counter = `待掌握 ${remaining} 题`;
       progressValue = ((session.initialTotal - remaining) / session.initialTotal) * 100;
     } else {
@@ -499,6 +553,7 @@
     $("question-counter").textContent = counter;
     $("question-progress-bar").style.width = `${Math.max(0, progressValue)}%`;
     $("question-type").textContent = question.type;
+    updateLearningStatusBadge(question.id);
     $("question-chapter").textContent = `${question.chapter.toUpperCase()} · ${question.chapterTitle}`;
     $("question-stem").textContent = question.stem;
     questionCard.classList.remove("question-single", "question-multiple", "question-judge");
@@ -557,6 +612,18 @@
         <span class="answer-mode-icon" aria-hidden="true">→</span>
         <span><strong>${question.type === "判断题" ? "判断选择" : "单项选择"}</strong><small>选择一个答案后将立即提交</small></span>`;
     }
+  }
+
+  function updateLearningStatusBadge(questionId) {
+    const status = learningStatus(questionId);
+    const badge = $("question-learning-status");
+    badge.className = `learning-status-badge ${status}`;
+    badge.textContent = {
+      unseen: "未学",
+      learning: "学习中",
+      mastered: "已掌握",
+      mistake: "错题",
+    }[status];
   }
 
   function renderStudyAnswer(question) {
@@ -634,16 +701,19 @@
     if (!session.selected.length || session.submitted) return;
     const question = session.list[session.index];
     const isCorrect = sameAnswer(session.selected, question.answer);
+    const wasMistake = isMistake(question.id);
     session.submitted = true;
     const response = {
       questionId: question.id,
       selected: [...session.selected],
       submitted: true,
       correct: isCorrect,
+      wasMistake,
     };
     session.responses[responseKey()] = response;
     recordAnswer(question, isCorrect);
     saveActiveSession();
+    updateLearningStatusBadge(question.id);
     $("submit-answer-button").classList.remove("visible");
 
     if (session.mode === "exam") {
@@ -674,9 +744,18 @@
 
     const feedback = $("feedback");
     feedback.className = `feedback visible ${response.correct ? "correct" : "wrong"}`;
-    feedback.innerHTML = response.correct
-      ? `✅ 正确！${isMastered(question.id) ? "该题已连续答对两次，移出错题本。" : "再连续答对一次即可掌握。"}`
-      : `❌ 错误！正确答案：${displayAnswerLabel(question)}　${escapeHtml(displayDetailedAnswer(question))}`;
+    if (response.correct) {
+      const message = isMastered(question.id)
+        ? response.wasMistake
+          ? "该题已连续答对两次，标记为已掌握并移出错题本。"
+          : "该题已连续答对两次，标记为已掌握。"
+        : isMistake(question.id)
+          ? "再连续答对一次，即可掌握并移出错题本。"
+          : "再连续答对一次即可掌握。";
+      feedback.innerHTML = `✅ 正确！${message}`;
+    } else {
+      feedback.innerHTML = `❌ 错误！已加入错题本。正确答案：${displayAnswerLabel(question)}　${escapeHtml(displayDetailedAnswer(question))}`;
+    }
     $("keyboard-hint").textContent = "点击“下一题”，或按回车 / 空格继续";
   }
 
@@ -692,7 +771,7 @@
     }
 
     if (session.mode === "review") {
-      if (session.list.every((question) => isMastered(question.id))) {
+      if (session.list.every((question) => !isMistake(question.id))) {
         clearActiveSession();
         dashboard();
         showToast("🎉 本轮错题已经全部清零");
@@ -772,7 +851,7 @@
 
   function prepareReviewQuestionForRevisit() {
     const current = session.list[session.index];
-    if (session.responses[current.id]?.submitted && !isMastered(current.id)) {
+    if (session.responses[current.id]?.submitted && isMistake(current.id)) {
       delete session.responses[current.id];
     }
   }
@@ -780,7 +859,7 @@
   function findReviewIndex(direction) {
     for (let offset = 1; offset <= session.list.length; offset += 1) {
       const index = (session.index + direction * offset + session.list.length) % session.list.length;
-      if (!isMastered(session.list[index].id)) return index;
+      if (isMistake(session.list[index].id)) return index;
     }
     return session.index;
   }
@@ -971,7 +1050,7 @@
     try {
       const parsed = JSON.parse(await file.text());
       if (parsed.version !== 1 || typeof parsed.streaks !== "object") throw new Error();
-      progress = { ...defaultState(), ...parsed };
+      progress = normalizeProgress(parsed);
       saveProgress();
       dashboard();
       showToast("进度导入成功");

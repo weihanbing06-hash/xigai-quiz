@@ -32,7 +32,7 @@
               <p class="eyebrow">系统化练习 · 持续巩固</p>
               <h1>练习、巩固、真正掌握。</h1>
               <p class="hero-copy">
-                所有题初始都在错题本。任一答题模式中连续答对两次，即视为掌握。
+                题目初始标记为未学；实际答错后才进入错题本，连续答对两次即视为掌握。
               </p>
             </div>
             <div class="mastery-ring" id="mastery-ring">
@@ -48,19 +48,19 @@
               <small>连续答对 2 次</small>
             </article>
             <article class="stat-card danger">
-              <span>错题待清</span>
-              <strong id="wrong-count">969</strong>
-              <small>当前仍需复习</small>
+              <span>错题本</span>
+              <strong id="wrong-count">0</strong>
+              <small>仅记录实际答错题</small>
             </article>
             <article class="stat-card">
-              <span>答题总次数</span>
-              <strong id="attempt-count">0</strong>
-              <small id="accuracy-label">正确率 0%</small>
+              <span>学习中</span>
+              <strong id="learning-count">0</strong>
+              <small>已接触但尚未掌握</small>
             </article>
             <article class="stat-card">
-              <span>题库规模</span>
-              <strong>969</strong>
-              <small>17 章 · 3 种题型</small>
+              <span>未学</span>
+              <strong id="unseen-count">969</strong>
+              <small>尚未作答</small>
             </article>
           </div>
 
@@ -92,7 +92,7 @@
             <button class="mode-card review" data-mode="review" type="button">
               <span class="mode-icon">↻</span>
               <strong>错题复习</strong>
-              <p>只练未掌握题，循环出现，直到连续答对两次。</p>
+              <p>只练实际答错过的题，连续答对两次后移出错题本。</p>
               <span class="mode-link">清空错题 →</span>
             </button>
             <button class="mode-card exam" data-mode="exam" type="button">
@@ -162,6 +162,7 @@
           <article class="question-card">
             <div class="question-meta">
               <span id="question-type" class="type-badge"></span>
+              <span id="question-learning-status" class="learning-status-badge"></span>
               <span id="question-chapter"></span>
             </div>
             <h2 id="question-stem"></h2>
