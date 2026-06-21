@@ -90,7 +90,6 @@
                 sourceIds: saved.listIds,
                 nextNewIndex: Math.min((Number(saved.index) || 0) + 1, saved.listIds.length),
                 generated: Math.min((Number(saved.index) || 0) + 1, 30),
-                roundSize: 30,
                 recentIds: saved.listIds.slice(Math.max(0, (Number(saved.index) || 0) - 5), (Number(saved.index) || 0) + 1),
                 itemMeta: saved.listIds
                   .slice(0, Math.min((Number(saved.index) || 0) + 1, saved.listIds.length))
@@ -260,7 +259,7 @@
     if (!window.confirm("确定放弃当前未完成的学习记录吗？已计入的掌握进度不会撤销。")) return;
     clearActiveSession();
     dashboard();
-    showToast("已放弃本轮学习");
+    showToast("已放弃本次学习");
   }
 
   function openSetup(mode) {
@@ -297,7 +296,6 @@
     $("setup-description").textContent = config.description;
     $("start-button").textContent = config.start;
     $("scope-fields").style.display = mode === "exam" ? "none" : "grid";
-    $("learning-round-field").hidden = mode !== "learning";
     updateSetupSummary();
     showScreen("setup-screen");
   }
@@ -322,8 +320,7 @@
     const list = filteredQuestions();
     const scope = $("chapter-select").value === "全部" ? "全题库" : $("chapter-select").selectedOptions[0].textContent;
     if (setupMode === "learning") {
-      const roundSize = Number($("learning-round-size").value);
-      $("setup-summary").innerHTML = `<strong>${scope}</strong> · ${$("type-select").value} · 本轮 <strong>${roundSize}</strong> 题，包含新题与间隔复习`;
+      $("setup-summary").innerHTML = `<strong>${scope}</strong> · ${$("type-select").value} · 新题按章节顺序推进，并间隔穿插旧题复习`;
       $("start-button").disabled = list.length === 0;
       return;
     }
@@ -332,7 +329,7 @@
     $("start-button").disabled = list.length === 0;
   }
 
-  function createLearningState(source, roundSize) {
+  function createLearningState(source) {
     let nextNewIndex = source.findIndex((question) => {
       const stats = progress.questionStats[question.id];
       const seenInLegacyProgress = Object.prototype.hasOwnProperty.call(progress.streaks, question.id);
@@ -343,10 +340,8 @@
       sourceIds: source.map((question) => question.id),
       nextNewIndex,
       generated: 0,
-      roundSize,
       recentIds: [],
       itemMeta: [],
-      startMastered: questions.filter((question) => isMastered(question.id)).length,
     };
   }
 
@@ -422,7 +417,7 @@
     }
     const learningState =
       setupMode === "learning"
-        ? createLearningState(source, Number($("learning-round-size").value))
+        ? createLearningState(source)
         : null;
     const list =
       setupMode === "learning"
@@ -486,8 +481,13 @@
     let counter;
     let progressValue;
     if (session.mode === "learning") {
-      counter = `本轮 ${session.index + 1} / ${session.learningState.roundSize} · 主线推进中`;
-      progressValue = ((session.index + 1) / session.learningState.roundSize) * 100;
+      const learned = session.learningState.nextNewIndex;
+      const total = session.learningState.sourceIds.length;
+      counter =
+        learned < total
+          ? `主线 ${learned} / ${total} · 已学习 ${session.index + 1}`
+          : `主线已完成 · 持续巩固 ${session.index + 1}`;
+      progressValue = total ? (learned / total) * 100 : 100;
     } else if (session.mode === "review") {
       const remaining = session.list.filter((q) => !isMastered(q.id)).length;
       counter = `待掌握 ${remaining} 题`;
@@ -710,10 +710,6 @@
         goToQuestion(session.index + 1);
         return;
       }
-      if (session.list.length >= session.learningState.roundSize) {
-        finishLearningRound();
-        return;
-      }
       const source = session.learningState.sourceIds.map((id) => questionMap.get(id)).filter(Boolean);
       session.list.push(takeNextLearningQuestion(session.learningState, source));
       goToQuestion(session.index + 1);
@@ -739,7 +735,7 @@
     if (session.index >= session.list.length - 1) {
       clearActiveSession();
       dashboard();
-      showToast("本轮学习已完成");
+      showToast("当前学习内容已完成");
     } else {
       goToQuestion(session.index + 1);
     }
@@ -749,51 +745,6 @@
     if (!session || session.index <= 0) return;
     if (session.mode === "review") prepareReviewQuestionForRevisit();
     goToQuestion(session.index - 1);
-  }
-
-  function finishLearningRound() {
-    const state = session.learningState;
-    const results = session.list.map((question, index) => ({
-      question,
-      response: session.responses[`${index}:${question.id}`],
-      meta: state.itemMeta[index] || { kind: "new", wasWeak: !isMastered(question.id) },
-    }));
-    const answered = results.filter((item) => item.response?.submitted);
-    const correctCount = answered.filter((item) => item.response.correct).length;
-    const newCount = results.filter((item) => item.meta.kind === "new").length;
-    const reviewCount = results.length - newCount;
-    const correctedCount = results.filter(
-      (item) => item.meta.wasWeak && item.meta.kind !== "new" && item.response?.correct,
-    ).length;
-    const masteredNow = questions.filter((question) => isMastered(question.id)).length;
-    const newlyMastered = Math.max(0, masteredNow - Number(state.startMastered || 0));
-    const accuracy = answered.length ? Math.round((correctCount / answered.length) * 100) : 0;
-
-    $("learning-result-title").textContent =
-      accuracy >= 85
-        ? "这一轮掌握得很稳。"
-        : accuracy >= 65
-          ? "这一轮，扎扎实实完成了。"
-          : "完成本身就是有效推进。";
-    $("learning-result-message").textContent =
-      correctedCount > 0
-        ? `本轮答对 ${correctCount} 题，并成功纠正 ${correctedCount} 次薄弱题。系统会继续降低已掌握题频率，把时间留给真正需要强化的内容。`
-        : `本轮答对 ${correctCount} 题，推进 ${newCount} 道主线题。暂时答错的题已经重新进入强化队列，下轮会在合适的间隔再次出现。`;
-    $("learning-result-stats").innerHTML = [
-      [correctCount, `答对题目 · ${accuracy}%`],
-      [newCount, "主线新题"],
-      [reviewCount, "间隔复习"],
-      [correctedCount, "纠正薄弱题"],
-      [newlyMastered, "新增掌握"],
-    ]
-      .map(
-        ([value, label]) =>
-          `<div class="learning-result-stat"><strong>${value}</strong><span>${label}</span></div>`,
-      )
-      .join("");
-
-    clearActiveSession();
-    showScreen("learning-result-screen");
   }
 
   function goToQuestion(index) {
@@ -909,12 +860,6 @@
       (session.mode === "learning" && !session.submitted);
     if (session.mode === "exam" && session.index >= session.list.length - 1) {
       nextButton.textContent = answeredExamCount() === session.list.length ? "交卷 ✓" : "查找未答题 →";
-    } else if (
-      session.mode === "learning" &&
-      session.index >= session.list.length - 1 &&
-      session.list.length >= session.learningState.roundSize
-    ) {
-      nextButton.textContent = "完成本轮 ✓";
     } else {
       nextButton.textContent = "下一题 →";
     }
@@ -1191,10 +1136,8 @@
   $("home-button").addEventListener("click", dashboard);
   $("chapter-select").addEventListener("change", updateSetupSummary);
   $("type-select").addEventListener("change", updateSetupSummary);
-  $("learning-round-size").addEventListener("change", updateSetupSummary);
   $("start-button").addEventListener("click", startSession);
   $("retry-exam-button").addEventListener("click", () => openSetup("exam"));
-  $("next-learning-round-button").addEventListener("click", () => openSetup("learning"));
   $("export-button").addEventListener("click", exportProgress);
   $("import-input").addEventListener("change", importProgress);
   $("reset-button").addEventListener("click", resetProgress);
