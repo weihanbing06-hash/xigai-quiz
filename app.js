@@ -1277,7 +1277,7 @@
         const isMissed = isCorrect && !isSelected;
         const classes = [
           "review-option",
-          isCorrect && isSelected ? "correct-choice" : "",
+          isCorrect ? "correct-choice" : "",
           isSelected && !isCorrect ? "wrong-choice" : "",
           isMissed ? "missed-choice" : "",
           isSelected ? "user-choice" : "",
@@ -1422,9 +1422,8 @@
     if (question.type === "判断题") return answerLabel(question, answer);
     const displayOptions = displayOptionsFor(question);
     return displayOptions
-      .map((option, index) => ({ option, position: index + 1 }))
-      .filter(({ option }) => answer.includes(option.key))
-      .map(({ option, position }) => `${position}. ${option.text}`)
+      .filter((option) => answer.includes(option.key))
+      .map((option) => option.text)
       .join("；");
   }
 
