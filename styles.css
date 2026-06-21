@@ -791,6 +791,8 @@ select { width: 100%; border: 1px solid var(--line); border-radius: 12px; paddin
 
 .settings-panel {
   width: min(590px, 100%);
+  max-height: min(880px, calc(100vh - 40px));
+  overflow: auto;
   padding: 28px;
   border-radius: 22px;
   background: #fff;
@@ -842,6 +844,56 @@ select { width: 100%; border: 1px solid var(--line); border-radius: 12px; paddin
 .setting-checkbox:checked + .setting-switch::after { transform: translateX(20px); }
 .setting-checkbox:focus-visible + .setting-switch { outline: 3px solid rgba(39,94,232,.24); }
 .settings-save-button { width: 100%; margin-top: 20px; }
+.keybinding-section { margin-top: 14px; }
+.keybinding-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  width: 100%;
+  padding: 17px 18px;
+  border: 1px solid #cbd8fb;
+  border-radius: 15px;
+  color: var(--ink);
+  background: #f5f8ff;
+  text-align: left;
+  cursor: pointer;
+}
+.keybinding-toggle strong, .keybinding-toggle small { display: block; }
+.keybinding-toggle small { margin-top: 4px; color: var(--muted); }
+#keybinding-toggle-icon { color: var(--blue); font-size: 22px; font-weight: 900; }
+.keybinding-panel {
+  margin-top: 10px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: #faf9f6;
+}
+.keybinding-panel[hidden] { display: none; }
+.keybinding-help { margin: 0 0 14px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.keybinding-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 108px;
+  align-items: center;
+  gap: 9px 14px;
+  font-size: 13px;
+}
+.key-capture-button {
+  min-height: 38px;
+  border: 1px solid #cbd3e3;
+  border-radius: 9px;
+  color: #244cae;
+  background: #fff;
+  font-weight: 900;
+  cursor: pointer;
+}
+.key-capture-button.recording {
+  color: #fff;
+  border-color: var(--blue);
+  background: var(--blue);
+  animation: timerPulse 1s ease-in-out infinite;
+}
+.reset-keybindings-button { width: 100%; margin-top: 14px; }
 
 .site-credit {
   padding: 28px 0 4px;
@@ -906,6 +958,7 @@ select { width: 100%; border: 1px solid var(--line); border-radius: 12px; paddin
   .answer-sheet-panel { max-height: 88vh; padding: 22px 16px; border-radius: 22px 22px 10px 10px; }
   .answer-sheet-grid { grid-template-columns: repeat(5, 1fr); }
   .settings-panel { padding: 22px 16px; border-radius: 22px 22px 10px 10px; }
+  .keybinding-grid { grid-template-columns: minmax(0, 1fr) 92px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

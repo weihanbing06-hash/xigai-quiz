@@ -10,6 +10,17 @@
   const STORAGE_KEY = "xigai-quiz-progress-v1";
   const SESSION_KEY = "xigai-quiz-active-session-v1";
   const SETTINGS_KEY = "xigai-quiz-settings-v1";
+  const DEFAULT_KEY_BINDINGS = {
+    option1: "1",
+    option2: "2",
+    option3: "3",
+    option4: "4",
+    judgeTrue: "1",
+    judgeFalse: "0",
+    submit: "Enter",
+    next: " ",
+    previous: "ArrowLeft",
+  };
   const questions = BANK.questions;
   const questionMap = new Map(questions.map((question) => [question.id, question]));
   const chapters = [...new Map(questions.map((q) => [q.chapter, q.chapterTitle])).entries()];
@@ -32,6 +43,8 @@
   let toastTimer = null;
   let examTimerInterval = null;
   let autoNextTimer = null;
+  let settingsDraft = null;
+  let recordingBinding = null;
 
   const $ = (id) => document.getElementById(id);
   const screens = [...document.querySelectorAll(".screen")];
@@ -83,9 +96,10 @@
       return {
         autoSubmit: parsed?.autoSubmit !== false,
         autoNextCorrect: Boolean(parsed?.autoNextCorrect),
+        keyBindings: { ...DEFAULT_KEY_BINDINGS, ...(parsed?.keyBindings || {}) },
       };
     } catch {
-      return { autoSubmit: true, autoNextCorrect: false };
+      return { autoSubmit: true, autoNextCorrect: false, keyBindings: { ...DEFAULT_KEY_BINDINGS } };
     }
   }
 
@@ -98,6 +112,18 @@
       window.clearTimeout(autoNextTimer);
       autoNextTimer = null;
     }
+  }
+
+  function keyLabel(key) {
+    return {
+      " ": "空格",
+      Enter: "回车",
+      ArrowLeft: "←",
+      ArrowRight: "→",
+      ArrowUp: "↑",
+      ArrowDown: "↓",
+      Escape: "Esc",
+    }[key] || (key.length === 1 ? key.toUpperCase() : key);
   }
 
   function saveActiveSession() {
@@ -347,7 +373,7 @@
       study: {
         eyebrow: "顺序记忆",
         title: "背题模式",
-        description: "题目与正确答案同时显示。按空格、回车或方向右键进入下一题；背题不改变掌握状态。",
+        description: "题目与正确答案同时显示，可使用设置中的上一题、下一题快捷键翻页；背题不改变掌握状态。",
         start: "开始背题",
       },
       learning: {
@@ -602,7 +628,7 @@
     if (session.mode === "study") {
       $("answer-mode-hint").hidden = true;
       renderStudyAnswer(question);
-      $("keyboard-hint").textContent = "空格 / 回车 / →：下一题　　←：上一题";
+      $("keyboard-hint").textContent = `${keyLabel(settings.keyBindings.next)}：下一题　　${keyLabel(settings.keyBindings.previous)}：上一题`;
     } else {
       renderAnswerModeHint(question);
       renderOptions(question);
@@ -612,13 +638,13 @@
       } else {
         $("keyboard-hint").textContent =
           question.type === "多选题"
-            ? "点击选项或按 1—4 选择，按回车提交"
+            ? `点击选项或按 ${optionKeysLabel()} 选择，按 ${keyLabel(settings.keyBindings.submit)} 提交`
             : question.type === "判断题"
               ? settings.autoSubmit
-                ? "点击选项，或按 1 选择“对”、按 0 选择“错”，自动提交"
+                ? `点击选项，或按 ${keyLabel(settings.keyBindings.judgeTrue)} 选择“对”、按 ${keyLabel(settings.keyBindings.judgeFalse)} 选择“错”，自动提交`
                 : "选择“对”或“错”，确认后点击提交答案"
               : settings.autoSubmit
-                ? "点击选项，或按 1—4 直接作答并自动提交"
+                ? `点击选项，或按 ${optionKeysLabel()} 直接作答并自动提交`
                 : "选择一个选项，确认后点击提交答案";
         if (question.type === "多选题" || !settings.autoSubmit) {
           $("submit-answer-button").classList.add("visible");
@@ -659,6 +685,17 @@
       mastered: "已掌握",
       mistake: "错题",
     }[status];
+  }
+
+  function optionKeysLabel() {
+    return [
+      settings.keyBindings.option1,
+      settings.keyBindings.option2,
+      settings.keyBindings.option3,
+      settings.keyBindings.option4,
+    ]
+      .map(keyLabel)
+      .join("、");
   }
 
   function renderStudyAnswer(question) {
@@ -807,7 +844,7 @@
     } else {
       feedback.innerHTML = `❌ 错误！已加入错题本。正确答案：${displayAnswerLabel(question)}　${escapeHtml(displayDetailedAnswer(question))}`;
     }
-    $("keyboard-hint").textContent = "点击“下一题”，或按回车 / 空格继续";
+    $("keyboard-hint").textContent = `点击“下一题”，或按 ${keyLabel(settings.keyBindings.next)} 继续`;
   }
 
   function nextQuestion() {
@@ -935,13 +972,20 @@
 
   function openSettings() {
     cancelAutoNext();
+    settingsDraft = {
+      autoSubmit: settings.autoSubmit,
+      autoNextCorrect: settings.autoNextCorrect,
+      keyBindings: { ...settings.keyBindings },
+    };
     $("auto-submit-setting").checked = settings.autoSubmit;
     $("auto-next-setting").checked = settings.autoNextCorrect;
+    renderKeybindingButtons();
     $("settings-overlay").hidden = false;
     document.body.style.overflow = "hidden";
   }
 
   function closeSettings() {
+    stopKeyCapture();
     $("settings-overlay").hidden = true;
     document.body.style.overflow = "";
   }
@@ -950,11 +994,97 @@
     settings = {
       autoSubmit: $("auto-submit-setting").checked,
       autoNextCorrect: $("auto-next-setting").checked,
+      keyBindings: { ...(settingsDraft?.keyBindings || settings.keyBindings) },
     };
     saveSettings();
     closeSettings();
     if (session && $("question-screen").classList.contains("active")) renderQuestion();
     showToast("答题设置已保存");
+  }
+
+  function toggleKeybindings() {
+    const panel = $("keybinding-panel");
+    panel.hidden = !panel.hidden;
+    $("keybinding-toggle-icon").textContent = panel.hidden ? "＋" : "−";
+  }
+
+  function renderKeybindingButtons() {
+    document.querySelectorAll("[data-keybinding]").forEach((button) => {
+      const name = button.dataset.keybinding;
+      button.textContent = keyLabel(settingsDraft.keyBindings[name]);
+      button.classList.remove("recording");
+    });
+  }
+
+  function beginKeyCapture(bindingName, button) {
+    stopKeyCapture();
+    recordingBinding = { bindingName, button };
+    button.textContent = "请按键…";
+    button.classList.add("recording");
+    window.addEventListener("keydown", captureKeybinding, true);
+  }
+
+  function captureKeybinding(event) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (!recordingBinding) return;
+    if (["Tab", "Escape"].includes(event.key)) {
+      showToast("Tab 和 Esc 保留给页面与系统操作");
+      stopKeyCapture();
+      renderKeybindingButtons();
+      return;
+    }
+    const conflict = findKeybindingConflict(recordingBinding.bindingName, event.key);
+    if (conflict) {
+      showToast(`该按键与“${conflict}”冲突，请换一个按键`);
+      stopKeyCapture();
+      renderKeybindingButtons();
+      return;
+    }
+    settingsDraft.keyBindings[recordingBinding.bindingName] = event.key;
+    stopKeyCapture();
+    renderKeybindingButtons();
+  }
+
+  function stopKeyCapture() {
+    if (recordingBinding) recordingBinding.button.classList.remove("recording");
+    recordingBinding = null;
+    window.removeEventListener("keydown", captureKeybinding, true);
+  }
+
+  function resetKeybindings() {
+    settingsDraft.keyBindings = { ...DEFAULT_KEY_BINDINGS };
+    renderKeybindingButtons();
+    showToast("已恢复默认按键，点击保存后生效");
+  }
+
+  function findKeybindingConflict(bindingName, key) {
+    const labels = {
+      option1: "选项 1",
+      option2: "选项 2",
+      option3: "选项 3",
+      option4: "选项 4",
+      judgeTrue: "判断：对",
+      judgeFalse: "判断：错",
+      submit: "提交答案",
+      next: "下一题",
+      previous: "上一题",
+    };
+    const optionNames = ["option1", "option2", "option3", "option4"];
+    const conflictNames =
+      bindingName === "previous"
+        ? Object.keys(labels).filter((name) => name !== bindingName)
+        : bindingName === "next"
+          ? ["previous"]
+          : optionNames.includes(bindingName)
+            ? [...optionNames.filter((name) => name !== bindingName), "submit", "previous"]
+            : ["judgeTrue", "judgeFalse"].includes(bindingName)
+              ? ["judgeTrue", "judgeFalse", "submit", "previous"].filter((name) => name !== bindingName)
+              : bindingName === "submit"
+                ? [...optionNames, "judgeTrue", "judgeFalse", "previous"]
+                : [];
+    const match = conflictNames.find((name) => settingsDraft.keyBindings[name] === key);
+    return match ? labels[match] : "";
   }
 
   function renderAnswerSheet() {
@@ -1248,13 +1378,14 @@
 
   function handleKeydown(event) {
     if (!session || !$("question-screen").classList.contains("active")) return;
+    if (!$("settings-overlay").hidden) return;
     if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
     const key = event.key;
     if (session.mode === "study") {
-      if ([" ", "Enter", "ArrowRight"].includes(key)) {
+      if (key === settings.keyBindings.next) {
         event.preventDefault();
         nextQuestion();
-      } else if (key === "ArrowLeft") {
+      } else if (key === settings.keyBindings.previous) {
         event.preventDefault();
         previousQuestion();
       }
@@ -1262,7 +1393,7 @@
     }
 
     if (session.submitted) {
-      if (key === "Enter" || key === " ") {
+      if (key === settings.keyBindings.next) {
         event.preventDefault();
         nextQuestion();
       }
@@ -1270,13 +1401,32 @@
     }
 
     const question = session.list[session.index];
-    if (question.type === "判断题" && (key === "1" || key === "0")) {
-      selectAnswer(key === "1" ? "T" : "F");
-    } else if (question.type !== "判断题" && /^[1-9]$/.test(key)) {
-      const option = displayOptionsFor(question)[Number(key) - 1];
-      if (option) selectAnswer(option.key);
+    if (key === settings.keyBindings.previous) {
+      event.preventDefault();
+      previousQuestion();
     } else if (
-      key === "Enter" &&
+      question.type === "判断题" &&
+      (key === settings.keyBindings.judgeTrue || key === settings.keyBindings.judgeFalse)
+    ) {
+      selectAnswer(key === settings.keyBindings.judgeTrue ? "T" : "F");
+    } else if (question.type !== "判断题") {
+      const optionIndex = [
+        settings.keyBindings.option1,
+        settings.keyBindings.option2,
+        settings.keyBindings.option3,
+        settings.keyBindings.option4,
+      ].indexOf(key);
+      const option = optionIndex >= 0 ? displayOptionsFor(question)[optionIndex] : null;
+      if (option) selectAnswer(option.key);
+      else if (
+        key === settings.keyBindings.submit &&
+        (question.type === "多选题" || (!settings.autoSubmit && session.selected.length))
+      ) {
+        event.preventDefault();
+        submitAnswer();
+      }
+    } else if (
+      key === settings.keyBindings.submit &&
       (question.type === "多选题" || (!settings.autoSubmit && session.selected.length))
     ) {
       event.preventDefault();
@@ -1304,6 +1454,11 @@
     if (event.target === $("settings-overlay")) closeSettings();
   });
   $("save-settings-button").addEventListener("click", applySettings);
+  $("toggle-keybindings-button").addEventListener("click", toggleKeybindings);
+  $("reset-keybindings-button").addEventListener("click", resetKeybindings);
+  document.querySelectorAll("[data-keybinding]").forEach((button) => {
+    button.addEventListener("click", () => beginKeyCapture(button.dataset.keybinding, button));
+  });
   $("import-input").addEventListener("change", importProgress);
   $("reset-button").addEventListener("click", resetProgress);
   $("resume-session-button").addEventListener("click", resumeActiveSession);

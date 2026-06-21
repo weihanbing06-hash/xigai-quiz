@@ -253,6 +253,30 @@
             <span class="setting-switch" aria-hidden="true"></span>
           </label>
         </div>
+        <section class="keybinding-section">
+          <button id="toggle-keybindings-button" class="keybinding-toggle" type="button">
+            <span>
+              <strong>自定义按键</strong>
+              <small>设置选项、判断、提交和翻题快捷键</small>
+            </span>
+            <span id="keybinding-toggle-icon">＋</span>
+          </button>
+          <div id="keybinding-panel" class="keybinding-panel" hidden>
+            <p class="keybinding-help">点击右侧按键框，再按下新的按键。设置允许在不同阶段复用同一个键。</p>
+            <div class="keybinding-grid">
+              <span>选项 1</span><button class="key-capture-button" data-keybinding="option1" type="button"></button>
+              <span>选项 2</span><button class="key-capture-button" data-keybinding="option2" type="button"></button>
+              <span>选项 3</span><button class="key-capture-button" data-keybinding="option3" type="button"></button>
+              <span>选项 4</span><button class="key-capture-button" data-keybinding="option4" type="button"></button>
+              <span>判断：对</span><button class="key-capture-button" data-keybinding="judgeTrue" type="button"></button>
+              <span>判断：错</span><button class="key-capture-button" data-keybinding="judgeFalse" type="button"></button>
+              <span>提交答案</span><button class="key-capture-button" data-keybinding="submit" type="button"></button>
+              <span>下一题</span><button class="key-capture-button" data-keybinding="next" type="button"></button>
+              <span>上一题</span><button class="key-capture-button" data-keybinding="previous" type="button"></button>
+            </div>
+            <button id="reset-keybindings-button" class="secondary-button reset-keybindings-button" type="button">恢复默认按键</button>
+          </div>
+        </section>
         <button id="save-settings-button" class="primary-button settings-save-button" type="button">保存设置</button>
       </section>
     </div>
